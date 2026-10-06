@@ -1,6 +1,6 @@
 # Next@NTU
 
-Next@NTU 是一個給台大學生使用的大學生涯 AI Coach 互動原型。專案已從單一靜態 HTML 檔重構為 Next.js、TypeScript 與 Tailwind CSS。
+Next@NTU 是一個給台大學生使用的大學生涯 AI Coach 互動原型。
 
 ## 技術架構
 
