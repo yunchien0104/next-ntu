@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { TodoPanel } from "./TodoPanel";
-import { usePersistentState } from "@/lib/storage";
 
 import type {
   ChatMessage,
@@ -17,32 +16,36 @@ export function CoachWorkspace({
   setTodos,
   notify,
   onProfile,
+  conversations,
+  setConversations,
+  activeConversationId,
+  setActiveConversationId,
 }: {
   todos: TodoItem[];
-  setTodos: React.Dispatch<React.SetStateAction<TodoItem[]>>;
+
+  setTodos: React.Dispatch<
+    React.SetStateAction<TodoItem[]>
+  >;
+
   notify: (message: string) => void;
+
   onProfile: () => void;
+
+  conversations: Conversation[];
+
+  setConversations: React.Dispatch<
+    React.SetStateAction<Conversation[]>
+  >;
+
+  activeConversationId: string | null;
+
+  setActiveConversationId: React.Dispatch<
+    React.SetStateAction<string | null>
+  >;
 }) {
   const [mobileView, setMobileView] =
     useState<"plan" | "coach">("coach");
 
-  const [conversations, setConversations] =
-    usePersistentState<Conversation[]>(
-      "next-ntu-conversations",
-      []
-    );
-
-  const [activeConversationId, setActiveConversationId] =
-    useState<string | null>(null);
-
-  /*
-   * 如果目前沒有任何 conversation，
-   * 自動建立第一個。
-   *
-   * 如果已經有 conversation，
-   * 但 activeConversationId 還沒設定，
-   * 自動開啟第一個。
-   */
   useEffect(() => {
     if (conversations.length === 0) {
       const now = new Date().toISOString();
@@ -62,24 +65,33 @@ export function CoachWorkspace({
       return;
     }
 
-    const activeStillExists = conversations.some(
-      (conversation) =>
-        conversation.id === activeConversationId
-    );
+    const activeStillExists =
+      conversations.some(
+        (conversation) =>
+          conversation.id ===
+          activeConversationId
+      );
 
-    if (!activeConversationId || !activeStillExists) {
-      setActiveConversationId(conversations[0].id);
+    if (
+      !activeConversationId ||
+      !activeStillExists
+    ) {
+      setActiveConversationId(
+        conversations[0].id
+      );
     }
   }, [
     conversations,
     activeConversationId,
     setConversations,
+    setActiveConversationId,
   ]);
 
   const activeConversation =
     conversations.find(
       (conversation) =>
-        conversation.id === activeConversationId
+        conversation.id ===
+        activeConversationId
     ) ?? null;
 
   const messages =
@@ -104,21 +116,26 @@ export function CoachWorkspace({
 
         const nextMessages =
           typeof action === "function"
-            ? action(conversation.messages)
+            ? action(
+                conversation.messages
+              )
             : action;
 
         return {
           ...conversation,
           messages: nextMessages,
-          updatedAt: new Date().toISOString(),
+          updatedAt:
+            new Date().toISOString(),
         };
       })
     );
   }
 
   function createNewConversation() {
-    const id = `conversation-${Date.now()}`;
-    const now = new Date().toISOString();
+    const id =
+      `conversation-${Date.now()}`;
+    const now =
+      new Date().toISOString();
 
     const newConversation: Conversation = {
       id,
@@ -140,9 +157,10 @@ export function CoachWorkspace({
   }
 
   function openConversation(id: string) {
-    const conversation = conversations.find(
-      (item) => item.id === id
-    );
+    const conversation =
+      conversations.find(
+        (item) => item.id === id
+      );
 
     if (!conversation) return;
 
@@ -198,10 +216,6 @@ export function CoachWorkspace({
       >
         <HistoryPanel
           onQuestion={(question) => {
-            /*
-             * 目前 HistoryPanel 還是舊版，
-             * 下一步會改成用 conversation id。
-             */
             const conversation =
               conversations.find(
                 (item) =>
@@ -209,7 +223,9 @@ export function CoachWorkspace({
               );
 
             if (conversation) {
-              openConversation(conversation.id);
+              openConversation(
+                conversation.id
+              );
             }
           }}
           notify={notify}
@@ -231,7 +247,9 @@ export function CoachWorkspace({
       >
         <ChatPanel
           title={title}
-          onTitleChange={updateConversationTitle}
+          onTitleChange={
+            updateConversationTitle
+          }
           addPlan={addPlan}
           notify={notify}
           messages={messages}
