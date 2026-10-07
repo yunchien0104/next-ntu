@@ -403,14 +403,17 @@ export function createChatRepository(
           {
             folder_id:
               folderId,
+
             conversation_id:
               conversationId,
+
             user_id:
               userId,
           },
           {
             onConflict:
               "folder_id,conversation_id",
+
             ignoreDuplicates:
               true,
           }
@@ -454,11 +457,6 @@ export function createChatRepository(
     userId: string,
     conversationId: string
   ): Promise<void> {
-    /*
-     * 先刪 messages。
-     * 即使 DB 有 cascade，
-     * 這樣也比較明確。
-     */
     const {
       error: messageError,
     } = await client
@@ -477,13 +475,6 @@ export function createChatRepository(
       throw messageError;
     }
 
-    /*
-     * 再刪 conversation。
-     *
-     * coach_folder_conversations
-     * 因為有 on delete cascade，
-     * 對應關聯會一起消失。
-     */
     const {
       error:
         conversationError,
