@@ -2,7 +2,6 @@
 
 import {
   KeyboardEvent,
-  useMemo,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -31,6 +30,7 @@ export function ChatPanel({
 }) {
   const [view, setView] = useState<View>("chat");
   const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const quickPrompts = [
     "哪些實習快截止？",
@@ -38,15 +38,12 @@ export function ChatPanel({
     "幫我找適合 coffee chat 的學長姊",
   ];
 
-  const busy = useMemo(
-    () => messages.some((message) => message.pending),
-    [messages]
-  );
-
   async function send() {
     const question = prompt.trim();
 
     if (!question || busy) return;
+
+    setBusy(true);
 
     const now = Date.now();
     const userId = `user-${now}`;
@@ -101,7 +98,7 @@ export function ChatPanel({
         )
       );
     } catch (error) {
-      console.error(error);
+      console.error("Chat API error:", error);
 
       setMessages((items) =>
         items.map((message) =>
@@ -117,6 +114,8 @@ export function ChatPanel({
       );
 
       notify("AI 回覆失敗");
+    } finally {
+      setBusy(false);
     }
   }
 
