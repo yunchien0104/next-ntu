@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+
 import { ChatPanel } from "./ChatPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { TodoPanel } from "./TodoPanel";
@@ -46,53 +47,25 @@ export function CoachWorkspace({
   const [mobileView, setMobileView] =
     useState<"plan" | "coach">("coach");
 
-  useEffect(() => {
-    if (conversations.length === 0) {
-      const now = new Date().toISOString();
-      const id = `conversation-${Date.now()}`;
-
-      const firstConversation: Conversation = {
-        id,
-        title: "新問題",
-        messages: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      setConversations([firstConversation]);
-      setActiveConversationId(id);
-
-      return;
-    }
-
-    const activeStillExists =
-      conversations.some(
-        (conversation) =>
-          conversation.id ===
-          activeConversationId
-      );
-
-    if (
-      !activeConversationId ||
-      !activeStillExists
-    ) {
-      setActiveConversationId(
-        conversations[0].id
-      );
-    }
-  }, [
-    conversations,
-    activeConversationId,
-    setConversations,
-    setActiveConversationId,
-  ]);
+  /*
+   * activeConversationId 有時候在初始化階段會暫時是 null。
+   *
+   * 如果 conversations 已經有資料，
+   * 就直接 fallback 到第一筆 conversation。
+   */
+  const resolvedConversationId =
+    activeConversationId ??
+    conversations[0]?.id ??
+    null;
 
   const activeConversation =
     conversations.find(
       (conversation) =>
         conversation.id ===
-        activeConversationId
-    ) ?? null;
+        resolvedConversationId
+    ) ??
+    conversations[0] ??
+    null;
 
   const messages =
     activeConversation?.messages ?? [];
@@ -100,16 +73,24 @@ export function CoachWorkspace({
   const title =
     activeConversation?.title ?? "新問題";
 
+  /*
+   * ChatPanel 所有 message 更新都會經過這裡。
+   *
+   * 不再因為 activeConversationId 暫時為 null
+   * 就直接 return。
+   */
   function setMessages(
     action: React.SetStateAction<ChatMessage[]>
   ) {
-    if (!activeConversationId) return;
+    const targetId =
+      resolvedConversationId;
+
+    if (!targetId) return;
 
     setConversations((items) =>
       items.map((conversation) => {
         if (
-          conversation.id !==
-          activeConversationId
+          conversation.id !== targetId
         ) {
           return conversation;
         }
@@ -129,11 +110,22 @@ export function CoachWorkspace({
         };
       })
     );
+
+    /*
+     * 如果目前只是 fallback 到 conversations[0]，
+     * 順便把它正式設成 active conversation。
+     */
+    if (!activeConversationId) {
+      setActiveConversationId(
+        targetId
+      );
+    }
   }
 
   function createNewConversation() {
     const id =
       `conversation-${Date.now()}`;
+
     const now =
       new Date().toISOString();
 
@@ -156,7 +148,9 @@ export function CoachWorkspace({
     notify("已建立新的對話");
   }
 
-  function openConversation(id: string) {
+  function openConversation(
+    id: string
+  ) {
     const conversation =
       conversations.find(
         (item) => item.id === id
@@ -173,12 +167,14 @@ export function CoachWorkspace({
   function updateConversationTitle(
     nextTitle: string
   ) {
-    if (!activeConversationId) return;
+    const targetId =
+      resolvedConversationId;
+
+    if (!targetId) return;
 
     setConversations((items) =>
       items.map((conversation) =>
-        conversation.id ===
-        activeConversationId
+        conversation.id === targetId
           ? {
               ...conversation,
               title: nextTitle,
@@ -188,9 +184,17 @@ export function CoachWorkspace({
           : conversation
       )
     );
+
+    if (!activeConversationId) {
+      setActiveConversationId(
+        targetId
+      );
+    }
   }
 
-  function addPlan(plan: string) {
+  function addPlan(
+    plan: string
+  ) {
     setTodos((items) => [
       {
         id: `plan-${Date.now()}`,
@@ -216,6 +220,12 @@ export function CoachWorkspace({
       >
         <HistoryPanel
           onQuestion={(question) => {
+            /*
+             * HistoryPanel 目前還是舊版，
+             * 暫時以 title 找 conversation。
+             *
+             * 下一步我們會正式改成直接使用 conversation id。
+             */
             const conversation =
               conversations.find(
                 (item) =>
@@ -245,16 +255,22 @@ export function CoachWorkspace({
             : "hidden"
         } min-h-0 w-full flex-1 lg:flex`}
       >
-        <ChatPanel
-          title={title}
-          onTitleChange={
-            updateConversationTitle
-          }
-          addPlan={addPlan}
-          notify={notify}
-          messages={messages}
-          setMessages={setMessages}
-        />
+        {activeConversation ? (
+          <ChatPanel
+            title={title}
+            onTitleChange={
+              updateConversationTitle
+            }
+            addPlan={addPlan}
+            notify={notify}
+            messages={messages}
+            setMessages={setMessages}
+          />
+        ) : (
+          <div className="grid min-h-0 flex-1 place-items-center text-sm text-[var(--muted)]">
+            正在準備 AI Coach…
+          </div>
+        )}
       </div>
 
       <nav className="fixed right-0 bottom-0 left-0 z-30 grid h-12 grid-cols-3 border-t border-[var(--line)] bg-[var(--panel)] lg:hidden">
