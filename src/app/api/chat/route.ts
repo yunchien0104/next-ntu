@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { COACH_INSTRUCTIONS } from "@/lib/prompt/coach";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,7 +9,6 @@ const openai = new OpenAI({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-
     const message = body.message;
 
     if (!message || typeof message !== "string") {
@@ -20,18 +20,7 @@ export async function POST(request: Request) {
 
     const response = await openai.responses.create({
       model: "gpt-6-astra",
-      instructions: `
-You are Next@NTU, an academic and career coach for National Taiwan University students.
-
-Your job is to help students:
-- explore academic directions
-- think through career choices
-- plan practical next steps
-- understand skills they should build
-
-Be clear, practical, and supportive.
-Do not pretend to know personal information that the student has not provided.
-      `,
+      instructions: COACH_INSTRUCTIONS,
       input: message,
     });
 
