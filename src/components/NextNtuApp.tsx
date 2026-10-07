@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+
 import { LoginScreen } from "@/components/auth/LoginScreen";
 import { CalendarPage } from "@/components/calendar/CalendarPage";
 import { CoachWorkspace } from "@/components/coach/CoachWorkspace";
@@ -11,14 +16,23 @@ import { TopBar } from "@/components/layout/TopBar";
 import { ResumeStudio } from "@/components/resume/ResumeStudio";
 import { TalentPage } from "@/components/talent/TalentPage";
 import { Toast } from "@/components/ui/Toast";
+
 import { initialTodos } from "@/lib/data";
 import { usePersistentState } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
-import type { ProductPage, Theme } from "@/lib/types";
+
+import type {
+  Conversation,
+  ProductPage,
+  Theme,
+} from "@/lib/types";
 
 export function NextNtuApp() {
-  const [mounted, setMounted] = useState(false);
-  const [signedIn, setSignedIn] = useState(false);
+  const [mounted, setMounted] =
+    useState(false);
+
+  const [signedIn, setSignedIn] =
+    useState(false);
 
   const [activePage, setActivePage] =
     useState<ProductPage>("coach");
@@ -38,12 +52,44 @@ export function NextNtuApp() {
   const [calendarDraft, setCalendarDraft] =
     useState("");
 
+  /*
+   * Todo
+   */
   const [todos, setTodos] =
     usePersistentState(
       "next-ntu-tasks",
       initialTodos
     );
 
+  /*
+   * AI Coach Conversations
+   *
+   * conversations 放在 NextNtuApp，
+   * 所以即使 CoachWorkspace 因為切頁被卸載，
+   * conversation 還是存在。
+   */
+  const [
+    conversations,
+    setConversations,
+  ] = usePersistentState<Conversation[]>(
+    "next-ntu-conversations",
+    []
+  );
+
+  /*
+   * 目前正在看的 conversation。
+   *
+   * 不需要放在 CoachWorkspace，
+   * 否則切頁後會被重新建立。
+   */
+  const [
+    activeConversationId,
+    setActiveConversationId,
+  ] = useState<string | null>(null);
+
+  /*
+   * Supabase session
+   */
   useEffect(() => {
     async function checkSession() {
       const { data } =
@@ -80,13 +126,78 @@ export function NextNtuApp() {
     };
   }, []);
 
+  /*
+   * Conversation 初始化
+   *
+   * 1. 如果 localStorage 裡完全沒有 conversation，
+   *    建立第一個。
+   *
+   * 2. 如果 conversations 已存在，
+   *    但 activeConversationId 還沒設定，
+   *    開啟第一個 conversation。
+   *
+   * 3. 如果 activeConversationId 指到不存在的 conversation，
+   *    自動 fallback 到第一個。
+   */
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (conversations.length === 0) {
+      const id =
+        `conversation-${Date.now()}`;
+
+      const now =
+        new Date().toISOString();
+
+      const firstConversation: Conversation =
+        {
+          id,
+          title: "新問題",
+          messages: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+
+      setConversations([
+        firstConversation,
+      ]);
+
+      setActiveConversationId(id);
+
+      return;
+    }
+
+    const activeStillExists =
+      conversations.some(
+        (conversation) =>
+          conversation.id ===
+          activeConversationId
+      );
+
+    if (
+      !activeConversationId ||
+      !activeStillExists
+    ) {
+      setActiveConversationId(
+        conversations[0].id
+      );
+    }
+  }, [
+    mounted,
+    conversations,
+    activeConversationId,
+    setConversations,
+  ]);
+
   const notify = useCallback(
     (message: string) => {
       setToast(message);
 
       window.setTimeout(() => {
         setToast((current) =>
-          current === message ? "" : current
+          current === message
+            ? ""
+            : current
         );
       }, 2200);
     },
@@ -119,7 +230,9 @@ export function NextNtuApp() {
     );
   }
 
-  function changePage(page: ProductPage) {
+  function changePage(
+    page: ProductPage
+  ) {
     setActivePage(page);
     setProfileOpen(false);
   }
@@ -142,7 +255,9 @@ export function NextNtuApp() {
     return (
       <>
         <LoginScreen
-          onLoginSuccess={handleLoginSuccess}
+          onLoginSuccess={
+            handleLoginSuccess
+          }
         />
 
         <Toast message={toast} />
@@ -174,6 +289,18 @@ export function NextNtuApp() {
           onProfile={() =>
             setProfileOpen(true)
           }
+          conversations={
+            conversations
+          }
+          setConversations={
+            setConversations
+          }
+          activeConversationId={
+            activeConversationId
+          }
+          setActiveConversationId={
+            setActiveConversationId
+          }
         />
       )}
 
@@ -188,7 +315,9 @@ export function NextNtuApp() {
       )}
 
       {activePage === "columns" && (
-        <ColumnsPage notify={notify} />
+        <ColumnsPage
+          notify={notify}
+        />
       )}
 
       {activePage === "talent" && (
@@ -199,7 +328,9 @@ export function NextNtuApp() {
       )}
 
       {activePage === "resume" && (
-        <ResumeStudio notify={notify} />
+        <ResumeStudio
+          notify={notify}
+        />
       )}
 
       <ProfileDrawer
