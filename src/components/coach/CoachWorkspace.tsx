@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChatPanel } from "./ChatPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { TodoPanel } from "./TodoPanel";
 import { usePersistentState } from "@/lib/storage";
+
 import type {
   ChatMessage,
   Conversation,
@@ -22,8 +23,6 @@ export function CoachWorkspace({
   notify: (message: string) => void;
   onProfile: () => void;
 }) {
-  const [title, setTitle] = useState("新問題");
-
   const [mobileView, setMobileView] =
     useState<"plan" | "coach">("coach");
 
@@ -33,8 +32,49 @@ export function CoachWorkspace({
       []
     );
 
-   const [activeConversationId, setActiveConversationId] =
+  const [activeConversationId, setActiveConversationId] =
     useState<string | null>(null);
+
+  /*
+   * 如果目前沒有任何 conversation，
+   * 自動建立第一個。
+   *
+   * 如果已經有 conversation，
+   * 但 activeConversationId 還沒設定，
+   * 自動開啟第一個。
+   */
+  useEffect(() => {
+    if (conversations.length === 0) {
+      const now = new Date().toISOString();
+      const id = `conversation-${Date.now()}`;
+
+      const firstConversation: Conversation = {
+        id,
+        title: "新問題",
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setConversations([firstConversation]);
+      setActiveConversationId(id);
+
+      return;
+    }
+
+    const activeStillExists = conversations.some(
+      (conversation) =>
+        conversation.id === activeConversationId
+    );
+
+    if (!activeConversationId || !activeStillExists) {
+      setActiveConversationId(conversations[0].id);
+    }
+  }, [
+    conversations,
+    activeConversationId,
+    setConversations,
+  ]);
 
   const activeConversation =
     conversations.find(
@@ -45,14 +85,20 @@ export function CoachWorkspace({
   const messages =
     activeConversation?.messages ?? [];
 
+  const title =
+    activeConversation?.title ?? "新問題";
+
   function setMessages(
     action: React.SetStateAction<ChatMessage[]>
   ) {
-    if (!activeConversation) return;
+    if (!activeConversationId) return;
 
     setConversations((items) =>
       items.map((conversation) => {
-        if (conversation.id !== activeConversation.id) {
+        if (
+          conversation.id !==
+          activeConversationId
+        ) {
           return conversation;
         }
 
@@ -65,9 +111,6 @@ export function CoachWorkspace({
           ...conversation,
           messages: nextMessages,
           updatedAt: new Date().toISOString(),
-          createdAt:
-            conversation.createdAt ||
-            new Date().toISOString(),
         };
       })
     );
@@ -91,7 +134,6 @@ export function CoachWorkspace({
     ]);
 
     setActiveConversationId(id);
-    setTitle("新問題");
     setMobileView("coach");
 
     notify("已建立新的對話");
@@ -105,24 +147,25 @@ export function CoachWorkspace({
     if (!conversation) return;
 
     setActiveConversationId(id);
-    setTitle(conversation.title);
     setMobileView("coach");
+
+    notify("已開啟過去的提問");
   }
 
   function updateConversationTitle(
     nextTitle: string
   ) {
-    setTitle(nextTitle);
-
-    if (!activeConversation) return;
+    if (!activeConversationId) return;
 
     setConversations((items) =>
       items.map((conversation) =>
-        conversation.id === activeConversation.id
+        conversation.id ===
+        activeConversationId
           ? {
               ...conversation,
               title: nextTitle,
-              updatedAt: new Date().toISOString(),
+              updatedAt:
+                new Date().toISOString(),
             }
           : conversation
       )
@@ -155,9 +198,19 @@ export function CoachWorkspace({
       >
         <HistoryPanel
           onQuestion={(question) => {
-            setTitle(question);
-            setMobileView("coach");
-            notify("已開啟過去的提問");
+            /*
+             * 目前 HistoryPanel 還是舊版，
+             * 下一步會改成用 conversation id。
+             */
+            const conversation =
+              conversations.find(
+                (item) =>
+                  item.title === question
+              );
+
+            if (conversation) {
+              openConversation(conversation.id);
+            }
           }}
           notify={notify}
         />
