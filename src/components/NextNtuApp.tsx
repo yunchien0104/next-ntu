@@ -322,6 +322,7 @@ export function NextNtuApp() {
 
       <ProfileDrawer
         open={profileOpen}
+        userId={userId}
         onClose={() =>
           setProfileOpen(false)
         }

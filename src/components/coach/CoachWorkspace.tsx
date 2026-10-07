@@ -126,6 +126,147 @@ export function CoachWorkspace({
     return success;
   }
 
+  async function createFolder(
+    name: string
+  ): Promise<boolean> {
+    if (chat.busyAny) {
+      notify(
+        "請先等待目前的 AI 回覆完成"
+      );
+      return false;
+    }
+
+    if (chat.unsavedCount > 0) {
+      notify(
+        "請先重試尚未儲存的訊息"
+      );
+      return false;
+    }
+
+    const folder =
+      await chat.createFolder(
+        name
+      );
+
+    if (!folder) {
+      notify(
+        "資料夾建立失敗"
+      );
+      return false;
+    }
+
+    notify(
+      `已建立資料夾「${folder.name}」`
+    );
+
+    return true;
+  }
+
+  async function addConversationToFolder(
+    folderId: string,
+    conversationId: string
+  ): Promise<boolean> {
+    if (chat.busyAny) {
+      notify(
+        "請先等待目前的 AI 回覆完成"
+      );
+      return false;
+    }
+
+    if (chat.unsavedCount > 0) {
+      notify(
+        "請先重試尚未儲存的訊息"
+      );
+      return false;
+    }
+
+    const success =
+      await chat.addConversationToFolder(
+        folderId,
+        conversationId
+      );
+
+    if (!success) {
+      notify(
+        "加入資料夾失敗"
+      );
+      return false;
+    }
+
+    notify(
+      "已加入資料夾"
+    );
+
+    return true;
+  }
+
+  async function removeConversationFromFolder(
+    folderId: string,
+    conversationId: string
+  ): Promise<boolean> {
+    if (chat.busyAny) {
+      notify(
+        "請先等待目前的 AI 回覆完成"
+      );
+      return false;
+    }
+
+    const success =
+      await chat.removeConversationFromFolder(
+        folderId,
+        conversationId
+      );
+
+    if (!success) {
+      notify(
+        "移出資料夾失敗"
+      );
+      return false;
+    }
+
+    notify(
+      "已從資料夾移除"
+    );
+
+    return true;
+  }
+
+  async function deleteConversation(
+    conversationId: string
+  ): Promise<boolean> {
+    if (chat.busyAny) {
+      notify(
+        "請先等待目前的 AI 回覆完成"
+      );
+      return false;
+    }
+
+    if (chat.unsavedCount > 0) {
+      notify(
+        "請先重試尚未儲存的訊息"
+      );
+      return false;
+    }
+
+    const success =
+      await chat.deleteConversation(
+        conversationId
+      );
+
+    if (!success) {
+      notify(
+        "刪除對話失敗"
+      );
+      return false;
+    }
+
+    notify(
+      "對話已永久刪除"
+    );
+
+    return true;
+  }
+
   if (chat.loading) {
     return (
       <main className="grid min-h-0 flex-1 place-items-center bg-[var(--bg)] text-sm text-[var(--muted)]">
@@ -147,6 +288,9 @@ export function CoachWorkspace({
           conversations={
             chat.conversations
           }
+          folders={
+            chat.folders
+          }
           activeConversationId={
             chat.activeConversationId
           }
@@ -155,6 +299,18 @@ export function CoachWorkspace({
           }
           onNewConversation={
             createNewConversation
+          }
+          onCreateFolder={
+            createFolder
+          }
+          onAddToFolder={
+            addConversationToFolder
+          }
+          onRemoveFromFolder={
+            removeConversationFromFolder
+          }
+          onDeleteConversation={
+            deleteConversation
           }
         />
 
@@ -207,7 +363,9 @@ export function CoachWorkspace({
           title={title}
           messages={messages}
           busy={chat.busy}
-          onSend={sendQuestion}
+          onSend={
+            sendQuestion
+          }
           onNewConversation={
             createNewConversation
           }

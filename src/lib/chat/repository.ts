@@ -24,6 +24,28 @@ export interface StoredConversation {
   updated_at: string;
 }
 
+export interface ChatFolder {
+  id: string;
+  userId: string;
+  name: string;
+  createdAt: string;
+  conversationIds: string[];
+}
+
+interface StoredFolder {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+}
+
+interface StoredFolderConversation {
+  folder_id: string;
+  conversation_id: string;
+  user_id: string;
+  created_at: string;
+}
+
 export function createChatRepository(
   client: SupabaseClient
 ) {
@@ -38,9 +60,6 @@ export function createChatRepository(
 
     const pageSize = 100;
 
-    /*
-     * 讀取 conversations。
-     */
     for (
       let offset = 0;
       ;
@@ -81,19 +100,12 @@ export function createChatRepository(
       }
     }
 
-    /*
-     * 沒有 conversation 時，
-     * 就不用繼續查 messages。
-     */
     if (
       conversations.length === 0
     ) {
       return [];
     }
 
-    /*
-     * 讀取這個使用者的所有訊息。
-     */
     for (
       let offset = 0;
       ;
@@ -140,9 +152,6 @@ export function createChatRepository(
       }
     }
 
-    /*
-     * 將 messages 依 conversation 分組。
-     */
     const grouped =
       new Map<
         string,
@@ -170,9 +179,6 @@ export function createChatRepository(
       );
     }
 
-    /*
-     * 轉成前端 Conversation 格式。
-     */
     return conversations
       .map(
         (
@@ -195,6 +201,105 @@ export function createChatRepository(
           a.updatedAt
         )
       );
+  }
+
+  async function loadFolders(
+    userId: string
+  ): Promise<ChatFolder[]> {
+    const {
+      data: folderData,
+      error: folderError,
+    } = await client
+      .from("coach_folders")
+      .select(
+        "id,user_id,name,created_at"
+      )
+      .eq("user_id", userId)
+      .order(
+        "created_at",
+        {
+          ascending: true,
+        }
+      );
+
+    if (folderError) {
+      throw folderError;
+    }
+
+    const folders =
+      (folderData ??
+        []) as StoredFolder[];
+
+    if (
+      folders.length === 0
+    ) {
+      return [];
+    }
+
+    const {
+      data: linkData,
+      error: linkError,
+    } = await client
+      .from(
+        "coach_folder_conversations"
+      )
+      .select(
+        "folder_id,conversation_id,user_id,created_at"
+      )
+      .eq("user_id", userId)
+      .order(
+        "created_at",
+        {
+          ascending: true,
+        }
+      );
+
+    if (linkError) {
+      throw linkError;
+    }
+
+    const links =
+      (linkData ??
+        []) as StoredFolderConversation[];
+
+    const grouped =
+      new Map<
+        string,
+        string[]
+      >();
+
+    for (
+      const link of links
+    ) {
+      const items =
+        grouped.get(
+          link.folder_id
+        ) ?? [];
+
+      items.push(
+        link.conversation_id
+      );
+
+      grouped.set(
+        link.folder_id,
+        items
+      );
+    }
+
+    return folders.map(
+      (folder) => ({
+        id: folder.id,
+        userId:
+          folder.user_id,
+        name: folder.name,
+        createdAt:
+          folder.created_at,
+        conversationIds:
+          grouped.get(
+            folder.id
+          ) ?? [],
+      })
+    );
   }
 
   async function create(
@@ -237,6 +342,172 @@ export function createChatRepository(
     };
   }
 
+  async function createFolder(
+    userId: string,
+    name: string
+  ): Promise<ChatFolder> {
+    const trimmedName =
+      name.trim();
+
+    if (!trimmedName) {
+      throw new Error(
+        "Folder name is required."
+      );
+    }
+
+    const { data, error } =
+      await client
+        .from("coach_folders")
+        .insert({
+          id: crypto.randomUUID(),
+          user_id: userId,
+          name: trimmedName,
+        })
+        .select(
+          "id,user_id,name,created_at"
+        )
+        .single();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw new Error(
+        "Folder was not created."
+      );
+    }
+
+    return {
+      id: data.id,
+      userId:
+        data.user_id,
+      name: data.name,
+      createdAt:
+        data.created_at,
+      conversationIds: [],
+    };
+  }
+
+  async function addConversationToFolder(
+    userId: string,
+    folderId: string,
+    conversationId: string
+  ): Promise<void> {
+    const { error } =
+      await client
+        .from(
+          "coach_folder_conversations"
+        )
+        .upsert(
+          {
+            folder_id:
+              folderId,
+            conversation_id:
+              conversationId,
+            user_id:
+              userId,
+          },
+          {
+            onConflict:
+              "folder_id,conversation_id",
+            ignoreDuplicates:
+              true,
+          }
+        );
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  async function removeConversationFromFolder(
+    userId: string,
+    folderId: string,
+    conversationId: string
+  ): Promise<void> {
+    const { error } =
+      await client
+        .from(
+          "coach_folder_conversations"
+        )
+        .delete()
+        .eq(
+          "folder_id",
+          folderId
+        )
+        .eq(
+          "conversation_id",
+          conversationId
+        )
+        .eq(
+          "user_id",
+          userId
+        );
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  async function deleteConversation(
+    userId: string,
+    conversationId: string
+  ): Promise<void> {
+    /*
+     * 先刪 messages。
+     * 即使 DB 有 cascade，
+     * 這樣也比較明確。
+     */
+    const {
+      error: messageError,
+    } = await client
+      .from("coach_messages")
+      .delete()
+      .eq(
+        "conversation_id",
+        conversationId
+      )
+      .eq(
+        "user_id",
+        userId
+      );
+
+    if (messageError) {
+      throw messageError;
+    }
+
+    /*
+     * 再刪 conversation。
+     *
+     * coach_folder_conversations
+     * 因為有 on delete cascade，
+     * 對應關聯會一起消失。
+     */
+    const {
+      error:
+        conversationError,
+    } = await client
+      .from(
+        "coach_conversations"
+      )
+      .delete()
+      .eq(
+        "id",
+        conversationId
+      )
+      .eq(
+        "user_id",
+        userId
+      );
+
+    if (
+      conversationError
+    ) {
+      throw conversationError;
+    }
+  }
+
   async function title(
     userId: string,
     conversationId: string,
@@ -269,10 +540,6 @@ export function createChatRepository(
   async function saveMessage(
     row: StoredMessage
   ): Promise<void> {
-    /*
-     * 相同 message id 重試時，
-     * 不建立重複訊息。
-     */
     const { error } =
       await client
         .from("coach_messages")
@@ -287,7 +554,15 @@ export function createChatRepository(
 
   return {
     load,
+    loadFolders,
+
     create,
+    createFolder,
+
+    addConversationToFolder,
+    removeConversationFromFolder,
+    deleteConversation,
+
     title,
     saveMessage,
   };

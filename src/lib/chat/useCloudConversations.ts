@@ -14,6 +14,7 @@ import type {
 
 import {
   createChatRepository,
+  type ChatFolder,
   type StoredMessage,
 } from "./repository";
 
@@ -29,9 +30,16 @@ export function useCloudConversations(
   ] = useState<Conversation[]>([]);
 
   const [
+    folders,
+    setFolders,
+  ] = useState<ChatFolder[]>([]);
+
+  const [
     activeConversationId,
     setActiveConversationId,
-  ] = useState<string | null>(null);
+  ] = useState<string | null>(
+    null
+  );
 
   const [loading, setLoading] =
     useState(true);
@@ -75,14 +83,20 @@ export function useCloudConversations(
   const retrying =
     useRef(false);
 
+  const folderBusy =
+    useRef(false);
+
   const loadedOwner =
     useRef<string | null>(
       null
     );
 
   /*
-   * 登入或切換帳號後，
-   * 從 Supabase 讀取該帳號的對話。
+   * 登入、切換帳號或 reload 時，
+   * 同時讀取：
+   *
+   * 1. conversations
+   * 2. folders
    */
   useEffect(() => {
     const current =
@@ -97,19 +111,18 @@ export function useCloudConversations(
       new Map();
 
     creating.current = false;
-
     retrying.current = false;
+    folderBusy.current = false;
 
     setConversations([]);
+    setFolders([]);
 
     setActiveConversationId(
       null
     );
 
     setBusyIds([]);
-
     setUnsavedCount(0);
-
     setError("");
 
     setLoading(
@@ -120,30 +133,43 @@ export function useCloudConversations(
       return;
     }
 
-    repository
-      .load(userId)
-      .then((items) => {
-        if (
-          current !==
-          generation.current
-        ) {
-          return;
+    Promise.all([
+      repository.load(userId),
+      repository.loadFolders(
+        userId
+      ),
+    ])
+      .then(
+        ([
+          conversationItems,
+          folderItems,
+        ]) => {
+          if (
+            current !==
+            generation.current
+          ) {
+            return;
+          }
+
+          loadedOwner.current =
+            userId;
+
+          setConversations(
+            conversationItems
+          );
+
+          setFolders(
+            folderItems
+          );
+
+          setActiveConversationId(
+            conversationItems[0]
+              ?.id ?? null
+          );
+
+          setLoading(false);
         }
-
-        loadedOwner.current =
-          userId;
-
-        setConversations(
-          items
-        );
-
-        setActiveConversationId(
-          items[0]?.id ??
-            null
-        );
-
-        setLoading(false);
-      })
+      )
       .catch(
         (
           cause: unknown
@@ -156,12 +182,12 @@ export function useCloudConversations(
           }
 
           console.error(
-            "Load conversations failed",
+            "Load chat data failed",
             cause
           );
 
           setError(
-            "無法讀取雲端對話。請確認 Supabase 資料表與權限設定，再重試。"
+            "無法讀取雲端對話或資料夾。請確認 Supabase 資料表與權限設定，再重試。"
           );
 
           setLoading(false);
@@ -184,7 +210,7 @@ export function useCloudConversations(
   );
 
   /*
-   * 建立新對話並選取。
+   * 建立新 conversation。
    */
   async function createConversation(
     title = "新問題"
@@ -256,8 +282,393 @@ export function useCloudConversations(
   }
 
   /*
-   * 產生 AI 短標題，
-   * 並存回 Supabase。
+   * 建立資料夾。
+   */
+  async function createFolder(
+    name: string
+  ): Promise<ChatFolder | null> {
+    const trimmedName =
+      name.trim();
+
+    if (
+      !userId ||
+      !ready ||
+      !trimmedName ||
+      folderBusy.current
+    ) {
+      return null;
+    }
+
+    const current =
+      generation.current;
+
+    folderBusy.current = true;
+
+    try {
+      const folder =
+        await repository.createFolder(
+          userId,
+          trimmedName
+        );
+
+      if (
+        current !==
+        generation.current
+      ) {
+        return null;
+      }
+
+      setFolders((items) => [
+        folder,
+        ...items,
+      ]);
+
+      return folder;
+    } catch (cause) {
+      if (
+        current ===
+        generation.current
+      ) {
+        console.error(
+          "Create folder failed",
+          cause
+        );
+
+        setError(
+          "資料夾建立失敗，請稍後再試。"
+        );
+      }
+
+      return null;
+    } finally {
+      if (
+        current ===
+        generation.current
+      ) {
+        folderBusy.current =
+          false;
+      }
+    }
+  }
+
+  /*
+   * 將 conversation 加入資料夾。
+   *
+   * 不複製 conversation。
+   * 只新增 folder-conversation 關聯。
+   */
+  async function addConversationToFolder(
+    folderId: string,
+    conversationId: string
+  ): Promise<boolean> {
+    if (
+      !userId ||
+      !ready ||
+      folderBusy.current
+    ) {
+      return false;
+    }
+
+    const folder =
+      folders.find(
+        (item) =>
+          item.id === folderId
+      );
+
+    const conversationExists =
+      conversations.some(
+        (item) =>
+          item.id ===
+          conversationId
+      );
+
+    if (
+      !folder ||
+      !conversationExists
+    ) {
+      return false;
+    }
+
+    /*
+     * 已經在這個資料夾就不用再加。
+     */
+    if (
+      folder.conversationIds.includes(
+        conversationId
+      )
+    ) {
+      return true;
+    }
+
+    const current =
+      generation.current;
+
+    folderBusy.current = true;
+
+    try {
+      await repository.addConversationToFolder(
+        userId,
+        folderId,
+        conversationId
+      );
+
+      if (
+        current !==
+        generation.current
+      ) {
+        return false;
+      }
+
+      setFolders((items) =>
+        items.map((item) =>
+          item.id !== folderId
+            ? item
+            : {
+                ...item,
+
+                conversationIds: [
+                  ...item.conversationIds,
+                  conversationId,
+                ],
+              }
+        )
+      );
+
+      return true;
+    } catch (cause) {
+      if (
+        current ===
+        generation.current
+      ) {
+        console.error(
+          "Add conversation to folder failed",
+          cause
+        );
+
+        setError(
+          "無法將對話加入資料夾，請稍後再試。"
+        );
+      }
+
+      return false;
+    } finally {
+      if (
+        current ===
+        generation.current
+      ) {
+        folderBusy.current =
+          false;
+      }
+    }
+  }
+
+  /*
+   * 只從資料夾移除 conversation。
+   *
+   * 不刪除原始 conversation，
+   * 也不刪 messages。
+   */
+  async function removeConversationFromFolder(
+    folderId: string,
+    conversationId: string
+  ): Promise<boolean> {
+    if (
+      !userId ||
+      !ready ||
+      folderBusy.current
+    ) {
+      return false;
+    }
+
+    const current =
+      generation.current;
+
+    folderBusy.current = true;
+
+    try {
+      await repository.removeConversationFromFolder(
+        userId,
+        folderId,
+        conversationId
+      );
+
+      if (
+        current !==
+        generation.current
+      ) {
+        return false;
+      }
+
+      setFolders((items) =>
+        items.map((item) =>
+          item.id !== folderId
+            ? item
+            : {
+                ...item,
+
+                conversationIds:
+                  item.conversationIds.filter(
+                    (id) =>
+                      id !==
+                      conversationId
+                  ),
+              }
+        )
+      );
+
+      return true;
+    } catch (cause) {
+      if (
+        current ===
+        generation.current
+      ) {
+        console.error(
+          "Remove conversation from folder failed",
+          cause
+        );
+
+        setError(
+          "無法將對話移出資料夾，請稍後再試。"
+        );
+      }
+
+      return false;
+    } finally {
+      if (
+        current ===
+        generation.current
+      ) {
+        folderBusy.current =
+          false;
+      }
+    }
+  }
+
+  /*
+   * 永久刪除 conversation。
+   *
+   * repository 會：
+   * 1. 刪除 messages
+   * 2. 刪除 conversation
+   *
+   * folder 關聯會因 DB cascade
+   * 一起被清掉。
+   */
+  async function deleteConversation(
+    conversationId: string
+  ): Promise<boolean> {
+    if (
+      !userId ||
+      !ready ||
+      busy.current.size > 0 ||
+      failedWrites.current
+        .size > 0 ||
+      folderBusy.current
+    ) {
+      return false;
+    }
+
+    const current =
+      generation.current;
+
+    folderBusy.current = true;
+
+    try {
+      await repository.deleteConversation(
+        userId,
+        conversationId
+      );
+
+      if (
+        current !==
+        generation.current
+      ) {
+        return false;
+      }
+
+      let nextConversations:
+        Conversation[] = [];
+
+      setConversations(
+        (items) => {
+          nextConversations =
+            items.filter(
+              (item) =>
+                item.id !==
+                conversationId
+            );
+
+          return nextConversations;
+        }
+      );
+
+      /*
+       * 同步清掉所有 folder 裡的連結。
+       */
+      setFolders((items) =>
+        items.map((folder) => ({
+          ...folder,
+
+          conversationIds:
+            folder.conversationIds.filter(
+              (id) =>
+                id !==
+                conversationId
+            ),
+        }))
+      );
+
+      /*
+       * 如果刪掉的就是目前開啟的 conversation，
+       * 自動切到下一筆。
+       */
+      if (
+        activeConversationId ===
+        conversationId
+      ) {
+        const remaining =
+          conversations.filter(
+            (item) =>
+              item.id !==
+              conversationId
+          );
+
+        setActiveConversationId(
+          remaining[0]?.id ??
+            null
+        );
+      }
+
+      return true;
+    } catch (cause) {
+      if (
+        current ===
+        generation.current
+      ) {
+        console.error(
+          "Delete conversation failed",
+          cause
+        );
+
+        setError(
+          "無法永久刪除對話，請稍後再試。"
+        );
+      }
+
+      return false;
+    } finally {
+      if (
+        current ===
+        generation.current
+      ) {
+        folderBusy.current =
+          false;
+      }
+    }
+  }
+
+  /*
+   * 產生 AI 短標題並存到 Supabase。
    */
   async function generateConversationTitle(
     ownerId: string,
@@ -374,12 +785,10 @@ export function useCloudConversations(
   }
 
   /*
-   * 流程：
-   *
    * 儲存問題
-   * → 呼叫 AI
+   * → AI 回答
    * → 儲存回答
-   * → 第一輪產生短標題
+   * → 第一輪產生短標題。
    */
   async function sendMessage(
     question: string
@@ -441,8 +850,8 @@ export function useCloudConversations(
         );
 
       /*
-       * 如果目前沒有 active conversation，
-       * 第一題送出時自動建立。
+       * 沒有 active conversation 時，
+       * 第一題自動建立。
        */
       if (!id) {
         const fallbackTitle =
@@ -478,41 +887,36 @@ export function useCloudConversations(
         ]);
       }
 
-      /*
-       * 這個 guard 是給 TypeScript
-       * 明確知道 id 從這裡開始一定是 string。
-       */
       if (!id) {
         return false;
       }
 
-      const conversationId: string =
-        id;
+      const conversationId:
+        string = id;
 
-      const userMessage: StoredMessage =
-        {
-          id:
-            crypto.randomUUID(),
+      const userMessage:
+        StoredMessage = {
+        id:
+          crypto.randomUUID(),
 
-          conversation_id:
-            conversationId,
+        conversation_id:
+          conversationId,
 
-          user_id:
-            userId,
+        user_id:
+          userId,
 
-          role:
-            "user",
+        role:
+          "user",
 
-          content:
-            question,
+        content:
+          question,
 
-          created_at:
-            new Date().toISOString(),
-        };
+        created_at:
+          new Date().toISOString(),
+      };
 
       /*
-       * 問題先存成功，
-       * 才呼叫 AI。
+       * 問題先存成功才呼叫 AI。
        */
       await repository.saveMessage(
         userMessage
@@ -529,9 +933,8 @@ export function useCloudConversations(
         crypto.randomUUID();
 
       /*
-       * 先把 user message
-       * 和 pending assistant
-       * 放進前端畫面。
+       * 前端先顯示 user message
+       * + pending assistant。
        */
       setConversations(
         (items) =>
@@ -629,10 +1032,6 @@ export function useCloudConversations(
           "目前無法取得 AI 回覆，請稍後再試一次。";
       }
 
-      /*
-       * 避免舊帳號的 AI 回覆
-       * 更新到新帳號。
-       */
       if (
         current !==
         generation.current
@@ -640,30 +1039,30 @@ export function useCloudConversations(
         return true;
       }
 
-      const assistantMessage: StoredMessage =
-        {
-          id:
-            replyId,
+      const assistantMessage:
+        StoredMessage = {
+        id:
+          replyId,
 
-          conversation_id:
-            conversationId,
+        conversation_id:
+          conversationId,
 
-          user_id:
-            userId,
+        user_id:
+          userId,
 
-          role:
-            "assistant",
+        role:
+          "assistant",
 
-          content:
-            reply,
+        content:
+          reply,
 
-          created_at:
-            new Date().toISOString(),
-        };
+        created_at:
+          new Date().toISOString(),
+      };
 
       /*
        * 把 pending assistant
-       * 換成真正回答。
+       * 換成正式回答。
        */
       setConversations(
         (items) =>
@@ -737,8 +1136,7 @@ export function useCloudConversations(
       }
 
       /*
-       * 只在第一輪對話
-       * 產生 AI 短標題。
+       * 第一輪產生 AI 短標題。
        */
       if (
         shouldGenerateTitle &&
@@ -794,8 +1192,7 @@ export function useCloudConversations(
 
   /*
    * 使用相同 message ID
-   * 重試失敗的雲端寫入，
-   * 避免產生重複回答。
+   * 重試失敗寫入。
    */
   async function retrySaving() {
     if (
@@ -884,7 +1281,8 @@ export function useCloudConversations(
       failedWrites.current
         .size > 0 ||
       creating.current ||
-      retrying.current
+      retrying.current ||
+      folderBusy.current
     ) {
       return;
     }
@@ -896,9 +1294,17 @@ export function useCloudConversations(
   }
 
   return {
+    /*
+     * Cloud data
+     */
     conversations:
       ready
         ? conversations
+        : [],
+
+    folders:
+      ready
+        ? folders
         : [],
 
     activeConversationId:
@@ -908,6 +1314,9 @@ export function useCloudConversations(
 
     setActiveConversationId,
 
+    /*
+     * Status
+     */
     loading,
 
     ready,
@@ -925,10 +1334,27 @@ export function useCloudConversations(
 
     unsavedCount,
 
+    /*
+     * Conversation actions
+     */
     createConversation,
+
+    deleteConversation,
 
     sendMessage,
 
+    /*
+     * Folder actions
+     */
+    createFolder,
+
+    addConversationToFolder,
+
+    removeConversationFromFolder,
+
+    /*
+     * Recovery
+     */
     retrySaving,
 
     reload,
