@@ -1,4 +1,10 @@
-export type ProductPage = "coach" | "calendar" | "columns" | "talent" | "resume";
+export type ProductPage =
+  | "coach"
+  | "calendar"
+  | "columns"
+  | "talent"
+  | "resume";
+
 export type Theme = "dark" | "light";
 
 export interface TodoItem {
@@ -15,6 +21,14 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   pending?: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CalendarEvent {
@@ -54,7 +68,10 @@ export interface Talent {
   roleModel?: boolean;
 }
 
-export type ResumeSectionType = "experience" | "education" | "skills";
+export type ResumeSectionType =
+  | "experience"
+  | "education"
+  | "skills";
 
 export interface ResumeEntry {
   organization: string;

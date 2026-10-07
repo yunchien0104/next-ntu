@@ -1,6 +1,13 @@
 "use client";
 
-import { KeyboardEvent, useMemo, useState } from "react";
+import {
+  KeyboardEvent,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 import type { ChatMessage } from "@/lib/types";
@@ -12,15 +19,18 @@ export function ChatPanel({
   onTitleChange,
   addPlan,
   notify,
+  messages,
+  setMessages,
 }: {
   title: string;
   onTitleChange: (title: string) => void;
   addPlan: (title: string) => void;
   notify: (message: string) => void;
+  messages: ChatMessage[];
+  setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
 }) {
   const [view, setView] = useState<View>("chat");
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const quickPrompts = [
     "哪些實習快截止？",
@@ -74,7 +84,9 @@ export function ChatPanel({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "AI request failed");
+        throw new Error(
+          data.error || "AI request failed"
+        );
       }
 
       setMessages((items) =>
@@ -96,7 +108,8 @@ export function ChatPanel({
           message.id === pendingId
             ? {
                 ...message,
-                content: "目前無法取得 AI 回覆，請稍後再試一次。",
+                content:
+                  "目前無法取得 AI 回覆，請稍後再試一次。",
                 pending: false,
               }
             : message
@@ -107,8 +120,13 @@ export function ChatPanel({
     }
   }
 
-  function handleKey(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+  function handleKey(
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
       event.preventDefault();
       send();
     }
@@ -131,7 +149,9 @@ export function ChatPanel({
           <Button
             onClick={() => {
               setPrompt("");
-              notify("告訴我你現在最想解決的問題");
+              notify(
+                "告訴我你現在最想解決的問題"
+              );
             }}
           >
             新規劃
@@ -259,27 +279,33 @@ export function ChatPanel({
 
           <div className="mt-2 flex items-end justify-between gap-3">
             <div className="hidden flex-wrap gap-1.5 md:flex">
-              {quickPrompts.map((item, index) => (
-                <button
-                  key={item}
-                  className="border border-[var(--line)] px-2 py-1 text-[9px] text-[var(--muted)] hover:text-[var(--text)]"
-                  onClick={() => setPrompt(item)}
-                >
-                  {
-                    [
-                      "快截止的實習",
-                      "比較三條路線",
-                      "找學長姊",
-                    ][index]
-                  }
-                </button>
-              ))}
+              {quickPrompts.map(
+                (item, index) => (
+                  <button
+                    key={item}
+                    className="border border-[var(--line)] px-2 py-1 text-[9px] text-[var(--muted)] hover:text-[var(--text)]"
+                    onClick={() =>
+                      setPrompt(item)
+                    }
+                  >
+                    {
+                      [
+                        "快截止的實習",
+                        "比較三條路線",
+                        "找學長姊",
+                      ][index]
+                    }
+                  </button>
+                )
+              )}
             </div>
 
             <button
               className="grid h-9 w-9 shrink-0 place-items-center bg-[var(--paper)] font-bold text-[var(--paper-ink)] disabled:opacity-40"
               onClick={send}
-              disabled={!prompt.trim() || busy}
+              disabled={
+                !prompt.trim() || busy
+              }
               aria-label="送出"
             >
               ↑
