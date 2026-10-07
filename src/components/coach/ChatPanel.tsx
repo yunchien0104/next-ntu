@@ -3,34 +3,47 @@
 import {
   KeyboardEvent,
   useState,
-  type Dispatch,
-  type SetStateAction,
 } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
-import type { ChatMessage } from "@/lib/types";
 
-type View = "chat" | "compare" | "sources";
+import type {
+  ChatMessage,
+} from "@/lib/types";
+
+type View =
+  | "chat"
+  | "compare"
+  | "sources";
+
+type ChatPanelProps = {
+  title: string;
+
+  messages: ChatMessage[];
+
+  busy: boolean;
+
+  onSend: (
+    question: string
+  ) => Promise<boolean>;
+
+  onNewConversation:
+    () => Promise<void>;
+};
 
 export function ChatPanel({
   title,
-  onTitleChange,
-  addPlan,
-  notify,
   messages,
-  setMessages,
-}: {
-  title: string;
-  onTitleChange: (title: string) => void;
-  addPlan: (title: string) => void;
-  notify: (message: string) => void;
-  messages: ChatMessage[];
-  setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
-}) {
-  const [view, setView] = useState<View>("chat");
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
+  busy,
+  onSend,
+  onNewConversation,
+}: ChatPanelProps) {
+  const [view, setView] =
+    useState<View>("chat");
+
+  const [prompt, setPrompt] =
+    useState("");
 
   const quickPrompts = [
     "哪些實習快截止？",
@@ -39,95 +52,49 @@ export function ChatPanel({
   ];
 
   async function send() {
-    const question = prompt.trim();
+    const question =
+      prompt.trim();
 
-    if (!question || busy) return;
+    if (
+      !question ||
+      busy
+    ) {
+      return;
+    }
 
-    setBusy(true);
-
-    const now = Date.now();
-    const userId = `user-${now}`;
-    const pendingId = `assistant-${now}`;
-
-    setMessages((items) => [
-      ...items,
-      {
-        id: userId,
-        role: "user",
-        content: question,
-      },
-      {
-        id: pendingId,
-        role: "assistant",
-        content: "",
-        pending: true,
-      },
-    ]);
-
+    /*
+     * 先清掉輸入框。
+     * 如果最後送出失敗，
+     * 再把問題放回去。
+     */
     setPrompt("");
+
     setView("chat");
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: question,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "AI request failed"
-        );
-      }
-
-      setMessages((items) =>
-        items.map((message) =>
-          message.id === pendingId
-            ? {
-                ...message,
-                content: data.reply,
-                pending: false,
-              }
-            : message
-        )
-      );
-    } catch (error) {
-      console.error("Chat API error:", error);
-
-      setMessages((items) =>
-        items.map((message) =>
-          message.id === pendingId
-            ? {
-                ...message,
-                content:
-                  "目前無法取得 AI 回覆，請稍後再試一次。",
-                pending: false,
-              }
-            : message
-        )
+    const success =
+      await onSend(
+        question
       );
 
-      notify("AI 回覆失敗");
-    } finally {
-      setBusy(false);
+    if (!success) {
+      setPrompt(
+        question
+      );
     }
   }
 
   function handleKey(
-    event: KeyboardEvent<HTMLTextAreaElement>
+    event:
+      KeyboardEvent<HTMLTextAreaElement>
   ) {
     if (
-      event.key === "Enter" &&
+      event.key ===
+        "Enter" &&
       !event.shiftKey
     ) {
       event.preventDefault();
-      send();
+
+      void send();
     }
   }
 
@@ -147,10 +114,7 @@ export function ChatPanel({
 
           <Button
             onClick={() => {
-              setPrompt("");
-              notify(
-                "告訴我你現在最想解決的問題"
-              );
+              void onNewConversation();
             }}
           >
             新規劃
@@ -163,31 +127,55 @@ export function ChatPanel({
         >
           {(
             [
-              ["chat", "AI 對話"],
-              ["compare", "方案比較"],
-              ["sources", "資料來源 12"],
-            ] as Array<[View, string]>
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={cn(
-                "border-b-2 pb-3 text-xs font-semibold",
-                view === key
-                  ? "border-[var(--paper)] text-[var(--text)]"
-                  : "border-transparent text-[var(--muted)]"
-              )}
-              onClick={() => setView(key)}
+              [
+                "chat",
+                "AI 對話",
+              ],
+              [
+                "compare",
+                "方案比較",
+              ],
+              [
+                "sources",
+                "資料來源 12",
+              ],
+            ] as Array<
+              [View, string]
             >
-              {label}
-            </button>
-          ))}
+          ).map(
+            ([
+              key,
+              label,
+            ]) => (
+              <button
+                key={key}
+                type="button"
+                className={cn(
+                  "border-b-2 pb-3 text-xs font-semibold",
+                  view ===
+                    key
+                    ? "border-[var(--paper)] text-[var(--text)]"
+                    : "border-transparent text-[var(--muted)]"
+                )}
+                onClick={() =>
+                  setView(
+                    key
+                  )
+                }
+              >
+                {label}
+              </button>
+            )
+          )}
         </nav>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-7">
-        {view === "chat" && (
+        {view ===
+          "chat" && (
           <div className="mx-auto max-w-4xl space-y-6">
-            {messages.length === 0 && (
+            {messages.length ===
+              0 && (
               <div className="py-10 text-center">
                 <div className="font-mono text-[9px] tracking-[.14em] text-[var(--muted)]">
                   NEXT@NTU · AI COACH
@@ -200,46 +188,61 @@ export function ChatPanel({
               </div>
             )}
 
-            {messages.map((message) =>
-              message.role === "user" ? (
-                <div
-                  key={message.id}
-                  className="flex justify-end animate-rise"
-                >
-                  <div className="max-w-[82%] bg-[var(--paper)] px-4 py-3 text-sm leading-6 text-[var(--paper-ink)]">
-                    {message.content}
+            {messages.map(
+              (message) =>
+                message.role ===
+                "user" ? (
+                  <div
+                    key={
+                      message.id
+                    }
+                    className="flex justify-end animate-rise"
+                  >
+                    <div className="max-w-[82%] bg-[var(--paper)] px-4 py-3 text-sm leading-6 text-[var(--paper-ink)]">
+                      {
+                        message.content
+                      }
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div
-                  key={message.id}
-                  className="animate-rise"
-                >
-                  <div className="font-mono text-[9px] tracking-[.14em] text-[var(--muted)]">
-                    PATH COACH ·{" "}
-                    {message.pending
-                      ? "THINKING"
-                      : "PERSONALIZED"}
-                  </div>
+                ) : (
+                  <div
+                    key={
+                      message.id
+                    }
+                    className="animate-rise"
+                  >
+                    <div className="font-mono text-[9px] tracking-[.14em] text-[var(--muted)]">
+                      PATH COACH ·{" "}
+                      {
+                        message.pending
+                          ? "THINKING"
+                          : "PERSONALIZED"
+                      }
+                    </div>
 
-                  {message.pending ? (
-                    <div className="mt-3 flex gap-1">
-                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
-                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
-                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
-                    </div>
-                  ) : (
-                    <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--soft)]">
-                      {message.content}
-                    </div>
-                  )}
-                </div>
-              )
+                    {message.pending ? (
+                      <div className="mt-3 flex gap-1">
+                        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
+
+                        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
+
+                        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[var(--soft)]" />
+                      </div>
+                    ) : (
+                      <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--soft)]">
+                        {
+                          message.content
+                        }
+                      </div>
+                    )}
+                  </div>
+                )
             )}
           </div>
         )}
 
-        {view === "compare" && (
+        {view ===
+          "compare" && (
           <div className="mx-auto max-w-4xl animate-rise">
             <div className="font-mono text-[9px] tracking-[.14em] text-[var(--muted)]">
               SCENARIO MATRIX
@@ -251,7 +254,8 @@ export function ChatPanel({
           </div>
         )}
 
-        {view === "sources" && (
+        {view ===
+          "sources" && (
           <div className="mx-auto max-w-4xl space-y-3 animate-rise">
             <div className="font-mono text-[9px] tracking-[.14em] text-[var(--muted)]">
               SOURCE CABINET
@@ -267,24 +271,43 @@ export function ChatPanel({
       <div className="border-t border-[var(--line)] bg-[var(--panel)] p-3 md:p-4">
         <div className="mx-auto max-w-4xl border border-[var(--line-strong)] bg-[var(--bg)] p-3">
           <textarea
-            className="min-h-14 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+            className="min-h-14 w-full bg-transparent text-sm outline-none placeholder:text-[var(--muted)] disabled:opacity-60"
             value={prompt}
-            onChange={(event) =>
-              setPrompt(event.target.value)
+            onChange={(
+              event
+            ) =>
+              setPrompt(
+                event.target
+                  .value
+              )
             }
-            onKeyDown={handleKey}
+            onKeyDown={
+              handleKey
+            }
+            disabled={busy}
             placeholder="問選課、實習、研究所、社團或找學長姊…"
           />
 
           <div className="mt-2 flex items-end justify-between gap-3">
             <div className="hidden flex-wrap gap-1.5 md:flex">
               {quickPrompts.map(
-                (item, index) => (
+                (
+                  item,
+                  index
+                ) => (
                   <button
-                    key={item}
-                    className="border border-[var(--line)] px-2 py-1 text-[9px] text-[var(--muted)] hover:text-[var(--text)]"
+                    key={
+                      item
+                    }
+                    type="button"
+                    className="border border-[var(--line)] px-2 py-1 text-[9px] text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40"
+                    disabled={
+                      busy
+                    }
                     onClick={() =>
-                      setPrompt(item)
+                      setPrompt(
+                        item
+                      )
                     }
                   >
                     {
@@ -292,7 +315,9 @@ export function ChatPanel({
                         "快截止的實習",
                         "比較三條路線",
                         "找學長姊",
-                      ][index]
+                      ][
+                        index
+                      ]
                     }
                   </button>
                 )
@@ -300,16 +325,26 @@ export function ChatPanel({
             </div>
 
             <button
+              type="button"
               className="grid h-9 w-9 shrink-0 place-items-center bg-[var(--paper)] font-bold text-[var(--paper-ink)] disabled:opacity-40"
-              onClick={send}
+              onClick={() => {
+                void send();
+              }}
               disabled={
-                !prompt.trim() || busy
+                !prompt.trim() ||
+                busy
               }
               aria-label="送出"
             >
               ↑
             </button>
           </div>
+
+          {busy && (
+            <div className="mt-2 text-[9px] text-[var(--muted)]">
+              AI 正在處理你的問題…
+            </div>
+          )}
         </div>
       </div>
     </section>

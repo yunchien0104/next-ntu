@@ -17,12 +17,12 @@ import { ResumeStudio } from "@/components/resume/ResumeStudio";
 import { TalentPage } from "@/components/talent/TalentPage";
 import { Toast } from "@/components/ui/Toast";
 
+import { useCloudConversations } from "@/lib/chat/useCloudConversations";
 import { initialTodos } from "@/lib/data";
 import { usePersistentState } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 
 import type {
-  Conversation,
   ProductPage,
   Theme,
 } from "@/lib/types";
@@ -31,8 +31,10 @@ export function NextNtuApp() {
   const [mounted, setMounted] =
     useState(false);
 
-  const [signedIn, setSignedIn] =
-    useState(false);
+  const [userId, setUserId] =
+    useState<string | null>(null);
+
+  const signedIn = Boolean(userId);
 
   const [activePage, setActivePage] =
     useState<ProductPage>("coach");
@@ -52,142 +54,17 @@ export function NextNtuApp() {
   const [calendarDraft, setCalendarDraft] =
     useState("");
 
-  /*
-   * Todo
-   */
+  // Todo 目前繼續使用原本的本機儲存。
   const [todos, setTodos] =
     usePersistentState(
       "next-ntu-tasks",
       initialTodos
     );
 
-  /*
-   * AI Coach Conversations
-   *
-   * conversations 放在 NextNtuApp，
-   * 所以即使 CoachWorkspace 因為切頁被卸載，
-   * conversation 還是存在。
-   */
-  const [
-    conversations,
-    setConversations,
-  ] = usePersistentState<Conversation[]>(
-    "next-ntu-conversations",
-    []
-  );
-
-  /*
-   * 目前正在看的 conversation。
-   *
-   * 不需要放在 CoachWorkspace，
-   * 否則切頁後會被重新建立。
-   */
-  const [
-    activeConversationId,
-    setActiveConversationId,
-  ] = useState<string | null>(null);
-
-  /*
-   * Supabase session
-   */
-  useEffect(() => {
-    async function checkSession() {
-      const { data } =
-        await supabase.auth.getSession();
-
-      setSignedIn(Boolean(data.session));
-      setMounted(true);
-    }
-
-    checkSession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSignedIn(Boolean(session));
-      }
-    );
-
-    const savedTheme =
-      window.localStorage.getItem(
-        "next-ntu-theme"
-      );
-
-    if (
-      savedTheme === "light" ||
-      savedTheme === "dark"
-    ) {
-      setTheme(savedTheme);
-    }
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  /*
-   * Conversation 初始化
-   *
-   * 1. 如果 localStorage 裡完全沒有 conversation，
-   *    建立第一個。
-   *
-   * 2. 如果 conversations 已存在，
-   *    但 activeConversationId 還沒設定，
-   *    開啟第一個 conversation。
-   *
-   * 3. 如果 activeConversationId 指到不存在的 conversation，
-   *    自動 fallback 到第一個。
-   */
-  useEffect(() => {
-    if (!mounted) return;
-
-    if (conversations.length === 0) {
-      const id =
-        `conversation-${Date.now()}`;
-
-      const now =
-        new Date().toISOString();
-
-      const firstConversation: Conversation =
-        {
-          id,
-          title: "新問題",
-          messages: [],
-          createdAt: now,
-          updatedAt: now,
-        };
-
-      setConversations([
-        firstConversation,
-      ]);
-
-      setActiveConversationId(id);
-
-      return;
-    }
-
-    const activeStillExists =
-      conversations.some(
-        (conversation) =>
-          conversation.id ===
-          activeConversationId
-      );
-
-    if (
-      !activeConversationId ||
-      !activeStillExists
-    ) {
-      setActiveConversationId(
-        conversations[0].id
-      );
-    }
-  }, [
-    mounted,
-    conversations,
-    activeConversationId,
-    setConversations,
-  ]);
+  // 對話由 Supabase 儲存。
+  // Hook 放在主程式，切換頁面時仍能繼續處理回答。
+  const chat =
+    useCloudConversations(userId);
 
   const notify = useCallback(
     (message: string) => {
@@ -204,21 +81,142 @@ export function NextNtuApp() {
     []
   );
 
+  // 取得目前帳號，並監聽登入、登出與帳號切換。
+  useEffect(() => {
+    let alive = true;
+    let authRevision = 0;
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!alive) return;
+
+        authRevision++;
+
+        setUserId(
+          session?.user.id ?? null
+        );
+
+        setMounted(true);
+      }
+    );
+
+    async function checkSession() {
+      const revision = authRevision;
+
+      try {
+        const { data, error } =
+          await supabase.auth.getSession();
+
+        if (
+          !alive ||
+          revision !== authRevision
+        ) {
+          return;
+        }
+
+        if (error) {
+          console.error(
+            "Read session failed:",
+            error
+          );
+
+          setUserId(null);
+          return;
+        }
+
+        setUserId(
+          data.session?.user.id ?? null
+        );
+      } catch (error) {
+        if (
+          alive &&
+          revision === authRevision
+        ) {
+          console.error(
+            "Read session failed:",
+            error
+          );
+
+          setUserId(null);
+        }
+      } finally {
+        if (alive) {
+          setMounted(true);
+        }
+      }
+    }
+
+    void checkSession();
+
+    const savedTheme =
+      window.localStorage.getItem(
+        "next-ntu-theme"
+      );
+
+    if (
+      savedTheme === "light" ||
+      savedTheme === "dark"
+    ) {
+      setTheme(savedTheme);
+    }
+
+    return () => {
+      alive = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   function handleLoginSuccess() {
-    setSignedIn(true);
+    // 帳號 ID 由上面的登入狀態監聽器更新。
+    setActivePage("coach");
+    setProfileOpen(false);
   }
 
   async function handleLogout() {
-    const { error } =
-      await supabase.auth.signOut();
-
-    if (error) {
-      notify("登出失敗");
+    if (chat.busyAny) {
+      notify(
+        "對話仍在處理中，請完成後再登出"
+      );
       return;
     }
 
-    setSignedIn(false);
-    setProfileOpen(false);
+    if (chat.unsavedCount > 0) {
+      setActivePage("coach");
+      setProfileOpen(false);
+
+      notify(
+        "還有訊息未存入雲端，請先按「重試儲存」"
+      );
+      return;
+    }
+
+    try {
+      const { error } =
+        await supabase.auth.signOut();
+
+      if (error) {
+        console.error(
+          "Sign out failed:",
+          error
+        );
+
+        notify("登出失敗");
+        return;
+      }
+
+      setUserId(null);
+      setProfileOpen(false);
+      setSettingsOpen(false);
+    } catch (error) {
+      console.error(
+        "Sign out failed:",
+        error
+      );
+
+      notify("登出失敗");
+    }
   }
 
   function changeTheme(next: Theme) {
@@ -289,18 +287,7 @@ export function NextNtuApp() {
           onProfile={() =>
             setProfileOpen(true)
           }
-          conversations={
-            conversations
-          }
-          setConversations={
-            setConversations
-          }
-          activeConversationId={
-            activeConversationId
-          }
-          setActiveConversationId={
-            setActiveConversationId
-          }
+          chat={chat}
         />
       )}
 
