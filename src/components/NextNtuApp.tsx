@@ -18,8 +18,7 @@ import { TalentPage } from "@/components/talent/TalentPage";
 import { Toast } from "@/components/ui/Toast";
 
 import { useCloudConversations } from "@/lib/chat/useCloudConversations";
-import { initialTodos } from "@/lib/data";
-import { usePersistentState } from "@/lib/storage";
+import { useCloudTasks } from "@/lib/tasks/useCloudTasks";
 import { supabase } from "@/lib/supabase";
 
 import type {
@@ -28,8 +27,7 @@ import type {
 } from "@/lib/types";
 
 export function NextNtuApp() {
-  const [mounted, setMounted] =
-    useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const [userId, setUserId] =
     useState<string | null>(null);
@@ -48,38 +46,38 @@ export function NextNtuApp() {
   const [theme, setTheme] =
     useState<Theme>("dark");
 
-  const [toast, setToast] =
-    useState("");
+  const [toast, setToast] = useState("");
 
   const [calendarDraft, setCalendarDraft] =
     useState("");
 
-  // Todo 目前繼續使用原本的本機儲存。
-  const [todos, setTodos] =
-    usePersistentState(
-      "next-ntu-tasks",
-      initialTodos
-    );
+  // 對話與任務都由 Supabase 儲存。
+  // Hook 放在主程式，切換頁面時仍保留共用狀態。
+  const chat = useCloudConversations(userId);
+  const taskStore = useCloudTasks(userId);
 
-  // 對話由 Supabase 儲存。
-  // Hook 放在主程式，切換頁面時仍能繼續處理回答。
-  const chat =
-    useCloudConversations(userId);
+  const notify = useCallback((message: string) => {
+    setToast(message);
 
-  const notify = useCallback(
-    (message: string) => {
-      setToast(message);
+    window.setTimeout(() => {
+      setToast((current) =>
+        current === message ? "" : current
+      );
+    }, 2200);
+  }, []);
 
-      window.setTimeout(() => {
-        setToast((current) =>
-          current === message
-            ? ""
-            : current
-        );
-      }, 2200);
-    },
-    []
-  );
+  const handleDraftConsumed = useCallback(() => {
+    setCalendarDraft("");
+  }, []);
+
+  // 日曆共用的參數，下一步修改 CalendarPage 後，
+  // 它就會開始使用這裡的 taskStore。
+  const calendarProps = {
+    taskStore,
+    notify,
+    draftTitle: calendarDraft,
+    onDraftConsumed: handleDraftConsumed,
+  };
 
   // 取得目前帳號，並監聽登入、登出與帳號切換。
   useEffect(() => {
@@ -94,10 +92,7 @@ export function NextNtuApp() {
 
         authRevision++;
 
-        setUserId(
-          session?.user.id ?? null
-        );
-
+        setUserId(session?.user.id ?? null);
         setMounted(true);
       }
     );
@@ -169,16 +164,14 @@ export function NextNtuApp() {
   }, []);
 
   function handleLoginSuccess() {
-    // 帳號 ID 由上面的登入狀態監聽器更新。
+    // 帳號 ID 由登入狀態監聽器更新。
     setActivePage("coach");
     setProfileOpen(false);
   }
 
   async function handleLogout() {
     if (chat.busyAny) {
-      notify(
-        "對話仍在處理中，請完成後再登出"
-      );
+      notify("對話仍在處理中，請完成後再登出");
       return;
     }
 
@@ -189,6 +182,11 @@ export function NextNtuApp() {
       notify(
         "還有訊息未存入雲端，請先按「重試儲存」"
       );
+      return;
+    }
+
+    if (taskStore.busy) {
+      notify("任務正在儲存，請完成後再登出");
       return;
     }
 
@@ -209,6 +207,8 @@ export function NextNtuApp() {
       setUserId(null);
       setProfileOpen(false);
       setSettingsOpen(false);
+      setCalendarDraft("");
+      setActivePage("coach");
     } catch (error) {
       console.error(
         "Sign out failed:",
@@ -228,9 +228,7 @@ export function NextNtuApp() {
     );
   }
 
-  function changePage(
-    page: ProductPage
-  ) {
+  function changePage(page: ProductPage) {
     setActivePage(page);
     setProfileOpen(false);
   }
@@ -253,9 +251,7 @@ export function NextNtuApp() {
     return (
       <>
         <LoginScreen
-          onLoginSuccess={
-            handleLoginSuccess
-          }
+          onLoginSuccess={handleLoginSuccess}
         />
 
         <Toast message={toast} />
@@ -281,8 +277,8 @@ export function NextNtuApp() {
 
       {activePage === "coach" && (
         <CoachWorkspace
-          todos={todos}
-          setTodos={setTodos}
+          key={userId}
+          taskStore={taskStore}
           notify={notify}
           onProfile={() =>
             setProfileOpen(true)
@@ -293,18 +289,13 @@ export function NextNtuApp() {
 
       {activePage === "calendar" && (
         <CalendarPage
-          notify={notify}
-          draftTitle={calendarDraft}
-          onDraftConsumed={() =>
-            setCalendarDraft("")
-          }
+          key={userId}
+          {...calendarProps}
         />
       )}
 
       {activePage === "columns" && (
-        <ColumnsPage
-          notify={notify}
-        />
+        <ColumnsPage notify={notify} />
       )}
 
       {activePage === "talent" && (
@@ -315,12 +306,11 @@ export function NextNtuApp() {
       )}
 
       {activePage === "resume" && (
-        <ResumeStudio
-          notify={notify}
-        />
+        <ResumeStudio notify={notify} />
       )}
 
       <ProfileDrawer
+        key={userId}
         open={profileOpen}
         userId={userId}
         onClose={() =>

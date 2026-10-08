@@ -6,29 +6,21 @@ import { ChatPanel } from "./ChatPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { TodoPanel } from "./TodoPanel";
 
-import type { TodoItem } from "@/lib/types";
+import type { CloudTasks } from "@/lib/tasks/useCloudTasks";
 
 type CloudChat = ReturnType<
   typeof import("@/lib/chat/useCloudConversations").useCloudConversations
 >;
 
 type CoachWorkspaceProps = {
-  todos: TodoItem[];
-
-  setTodos: React.Dispatch<
-    React.SetStateAction<TodoItem[]>
-  >;
-
+  taskStore: CloudTasks;
   notify: (message: string) => void;
-
   onProfile: () => void;
-
   chat: CloudChat;
 };
 
 export function CoachWorkspace({
-  todos,
-  setTodos,
+  taskStore,
   notify,
   onProfile,
   chat,
@@ -39,87 +31,58 @@ export function CoachWorkspace({
   const activeConversation =
     chat.conversations.find(
       (conversation) =>
-        conversation.id ===
-        chat.activeConversationId
+        conversation.id === chat.activeConversationId
     ) ??
     chat.conversations[0] ??
     null;
 
-  const messages =
-    activeConversation?.messages ?? [];
-
-  const title =
-    activeConversation?.title ??
-    "新問題";
+  const messages = activeConversation?.messages ?? [];
+  const title = activeConversation?.title ?? "新問題";
 
   async function createNewConversation() {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return;
     }
 
     if (chat.unsavedCount > 0) {
-      notify(
-        "請先重試尚未儲存的訊息"
-      );
+      notify("請先重試尚未儲存的訊息");
       return;
     }
 
-    const conversation =
-      await chat.createConversation();
+    const conversation = await chat.createConversation();
 
     if (!conversation) {
-      notify(
-        "新對話建立失敗"
-      );
+      notify("新對話建立失敗");
       return;
     }
 
     setMobileView("coach");
-
-    notify(
-      "已建立新的對話"
-    );
+    notify("已建立新的對話");
   }
 
-  function openConversation(
-    id: string
-  ) {
+  function openConversation(id: string) {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return;
     }
 
-    chat.setActiveConversationId(
-      id
-    );
-
+    chat.setActiveConversationId(id);
     setMobileView("coach");
   }
 
   async function sendQuestion(
     question: string
   ): Promise<boolean> {
-    const success =
-      await chat.sendMessage(
-        question
-      );
+    const success = await chat.sendMessage(question);
 
     if (!success) {
-      if (
-        chat.unsavedCount > 0
-      ) {
+      if (chat.unsavedCount > 0) {
         notify(
           "尚有訊息未成功存入雲端，請先重試儲存"
         );
       } else {
-        notify(
-          "問題送出失敗，請稍後再試"
-        );
+        notify("問題送出失敗，請稍後再試");
       }
     }
 
@@ -130,35 +93,23 @@ export function CoachWorkspace({
     name: string
   ): Promise<boolean> {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return false;
     }
 
     if (chat.unsavedCount > 0) {
-      notify(
-        "請先重試尚未儲存的訊息"
-      );
+      notify("請先重試尚未儲存的訊息");
       return false;
     }
 
-    const folder =
-      await chat.createFolder(
-        name
-      );
+    const folder = await chat.createFolder(name);
 
     if (!folder) {
-      notify(
-        "資料夾建立失敗"
-      );
+      notify("資料夾建立失敗");
       return false;
     }
 
-    notify(
-      `已建立資料夾「${folder.name}」`
-    );
-
+    notify(`已建立資料夾「${folder.name}」`);
     return true;
   }
 
@@ -167,16 +118,12 @@ export function CoachWorkspace({
     conversationId: string
   ): Promise<boolean> {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return false;
     }
 
     if (chat.unsavedCount > 0) {
-      notify(
-        "請先重試尚未儲存的訊息"
-      );
+      notify("請先重試尚未儲存的訊息");
       return false;
     }
 
@@ -187,16 +134,11 @@ export function CoachWorkspace({
       );
 
     if (!success) {
-      notify(
-        "加入資料夾失敗"
-      );
+      notify("加入資料夾失敗");
       return false;
     }
 
-    notify(
-      "已加入資料夾"
-    );
-
+    notify("已加入資料夾");
     return true;
   }
 
@@ -205,9 +147,7 @@ export function CoachWorkspace({
     conversationId: string
   ): Promise<boolean> {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return false;
     }
 
@@ -218,16 +158,11 @@ export function CoachWorkspace({
       );
 
     if (!success) {
-      notify(
-        "移出資料夾失敗"
-      );
+      notify("移出資料夾失敗");
       return false;
     }
 
-    notify(
-      "已從資料夾移除"
-    );
-
+    notify("已從資料夾移除");
     return true;
   }
 
@@ -235,35 +170,24 @@ export function CoachWorkspace({
     conversationId: string
   ): Promise<boolean> {
     if (chat.busyAny) {
-      notify(
-        "請先等待目前的 AI 回覆完成"
-      );
+      notify("請先等待目前的 AI 回覆完成");
       return false;
     }
 
     if (chat.unsavedCount > 0) {
-      notify(
-        "請先重試尚未儲存的訊息"
-      );
+      notify("請先重試尚未儲存的訊息");
       return false;
     }
 
     const success =
-      await chat.deleteConversation(
-        conversationId
-      );
+      await chat.deleteConversation(conversationId);
 
     if (!success) {
-      notify(
-        "刪除對話失敗"
-      );
+      notify("刪除對話失敗");
       return false;
     }
 
-    notify(
-      "對話已永久刪除"
-    );
-
+    notify("對話已永久刪除");
     return true;
   }
 
@@ -279,53 +203,32 @@ export function CoachWorkspace({
     <main className="relative flex min-h-0 flex-1 overflow-hidden pb-12 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] lg:pb-0">
       <aside
         className={`${
-          mobileView === "plan"
-            ? "flex"
-            : "hidden"
+          mobileView === "plan" ? "flex" : "hidden"
         } min-h-0 w-full flex-col overflow-y-auto border-r border-[var(--line)] bg-[var(--panel)] lg:flex`}
       >
         <HistoryPanel
-          conversations={
-            chat.conversations
-          }
-          folders={
-            chat.folders
-          }
-          activeConversationId={
-            chat.activeConversationId
-          }
-          onConversationSelect={
-            openConversation
-          }
-          onNewConversation={
-            createNewConversation
-          }
-          onCreateFolder={
-            createFolder
-          }
-          onAddToFolder={
-            addConversationToFolder
-          }
+          conversations={chat.conversations}
+          folders={chat.folders}
+          activeConversationId={chat.activeConversationId}
+          onConversationSelect={openConversation}
+          onNewConversation={createNewConversation}
+          onCreateFolder={createFolder}
+          onAddToFolder={addConversationToFolder}
           onRemoveFromFolder={
             removeConversationFromFolder
           }
-          onDeleteConversation={
-            deleteConversation
-          }
+          onDeleteConversation={deleteConversation}
         />
 
         <TodoPanel
-          todos={todos}
-          setTodos={setTodos}
+          taskStore={taskStore}
           notify={notify}
         />
       </aside>
 
       <div
         className={`${
-          mobileView === "coach"
-            ? "flex"
-            : "hidden"
+          mobileView === "coach" ? "flex" : "hidden"
         } min-h-0 w-full flex-1 flex-col lg:flex`}
       >
         {chat.error && (
@@ -334,8 +237,7 @@ export function CoachWorkspace({
               {chat.error}
             </p>
 
-            {chat.unsavedCount >
-            0 ? (
+            {chat.unsavedCount > 0 ? (
               <button
                 type="button"
                 className="shrink-0 border border-[var(--line-strong)] px-2 py-1 text-[9px] hover:bg-[var(--panel-2)]"
@@ -350,7 +252,7 @@ export function CoachWorkspace({
                 type="button"
                 className="shrink-0 border border-[var(--line-strong)] px-2 py-1 text-[9px] hover:bg-[var(--panel-2)]"
                 onClick={() => {
-                  chat.reload();
+                  void chat.reload();
                 }}
               >
                 重新載入
@@ -363,12 +265,8 @@ export function CoachWorkspace({
           title={title}
           messages={messages}
           busy={chat.busy}
-          onSend={
-            sendQuestion
-          }
-          onNewConversation={
-            createNewConversation
-          }
+          onSend={sendQuestion}
+          onNewConversation={createNewConversation}
         />
       </div>
 
@@ -380,9 +278,7 @@ export function CoachWorkspace({
               ? "bg-[var(--paper)] text-[var(--paper-ink)]"
               : "text-[var(--muted)]"
           }
-          onClick={() =>
-            setMobileView("plan")
-          }
+          onClick={() => setMobileView("plan")}
         >
           計畫
         </button>
@@ -394,9 +290,7 @@ export function CoachWorkspace({
               ? "bg-[var(--paper)] text-[var(--paper-ink)]"
               : "text-[var(--muted)]"
           }
-          onClick={() =>
-            setMobileView("coach")
-          }
+          onClick={() => setMobileView("coach")}
         >
           AI Coach
         </button>
