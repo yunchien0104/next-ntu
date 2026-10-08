@@ -11,7 +11,7 @@ import {
   randomOAuthSecret,
   requireCalendarOrigin,
   requireCalendarUser,
-} from "@/lib/google/calendarServer";
+} from "@/lib/google/calendar/calendarServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

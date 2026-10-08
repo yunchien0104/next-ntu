@@ -24,14 +24,6 @@ const GOOGLE_SCOPES = [
   GOOGLE_CALENDAR_SCOPE,
 ];
 
-interface GoogleTokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  scope?: string;
-  error?: string;
-}
-
 export interface GoogleTokens {
   accessToken: string;
   refreshToken: string;
@@ -49,13 +41,36 @@ export interface GoogleConnection {
   updated_at: string;
 }
 
+interface GoogleAccount {
+  subject: string;
+  email: string;
+}
+
+interface GoogleTokenResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+  scope?: string;
+}
+
+const CONNECTION_COLUMNS = [
+  "user_id",
+  "connection_id",
+  "google_subject",
+  "google_email",
+  "tokens_encrypted",
+  "granted_scopes",
+  "created_at",
+  "updated_at",
+].join(",");
+
 export class CalendarServerError extends Error {
-  constructor(
-    message: string,
-    public readonly status = 500
-  ) {
+  readonly status: number;
+
+  constructor(message: string, status = 500) {
     super(message);
     this.name = "CalendarServerError";
+    this.status = status;
   }
 }
 
@@ -64,7 +79,8 @@ function requiredEnv(name: string): string {
 
   if (!value) {
     throw new CalendarServerError(
-      `伺服器缺少環境變數：${name}`
+      `伺服器缺少環境變數：${name}`,
+      500
     );
   }
 
@@ -72,44 +88,50 @@ function requiredEnv(name: string): string {
 }
 
 export function getGoogleConfig() {
+  const clientId = requiredEnv("GOOGLE_CLIENT_ID");
+  const clientSecret = requiredEnv(
+    "GOOGLE_CLIENT_SECRET"
+  );
   const redirectUri = requiredEnv(
     "GOOGLE_CALENDAR_REDIRECT_URI"
   );
 
-  const url = new URL(redirectUri);
+  let redirectUrl: URL;
 
-  const localHttp =
-    url.protocol === "http:" &&
-    url.hostname === "localhost";
-
-  if (
-    url.protocol !== "https:" &&
-    !localHttp
-  ) {
+  try {
+    redirectUrl = new URL(redirectUri);
+  } catch {
     throw new CalendarServerError(
-      "Google 回呼網址必須使用 HTTPS，或 localhost"
+      "GOOGLE_CALENDAR_REDIRECT_URI 格式不正確。",
+      500
     );
   }
 
+  const isLocal =
+    redirectUrl.protocol === "http:" &&
+    redirectUrl.hostname === "localhost";
+
   if (
-    url.pathname !==
+    (redirectUrl.protocol !== "https:" && !isLocal) ||
+    redirectUrl.pathname !==
       "/api/google/calendar/callback" ||
-    url.search ||
-    url.hash
+    redirectUrl.search !== "" ||
+    redirectUrl.hash !== "" ||
+    redirectUrl.username !== "" ||
+    redirectUrl.password !== ""
   ) {
     throw new CalendarServerError(
-      "Google 回呼網址設定不正確"
+      "Google 回呼網址設定不正確，請檢查 GOOGLE_CALENDAR_REDIRECT_URI。",
+      500
     );
   }
 
   return {
-    clientId: requiredEnv("GOOGLE_CLIENT_ID"),
-    clientSecret: requiredEnv(
-      "GOOGLE_CLIENT_SECRET"
-    ),
+    clientId,
+    clientSecret,
     redirectUri,
-    origin: url.origin,
-    secureCookie: url.protocol === "https:",
+    origin: redirectUrl.origin,
+    secureCookie: redirectUrl.protocol === "https:",
   };
 }
 
@@ -127,7 +149,6 @@ export function getCalendarAdmin(): SupabaseClient {
   );
 }
 
-// 讀取任務時使用使用者本人的權限，保留原有 RLS。
 export function getCalendarUserClient(
   accessToken: string
 ): SupabaseClient {
@@ -149,33 +170,33 @@ export function getCalendarUserClient(
   );
 }
 
-// 向 Supabase 驗證 JWT，不相信前端自行提供的 userId。
 export async function requireCalendarUser(
   request: Request
 ) {
   const authorization =
-    request.headers.get("authorization") ?? "";
+    request.headers.get("Authorization");
 
-  const match = authorization.match(
+  const match = authorization?.match(
     /^Bearer\s+(\S+)$/i
   );
 
   if (!match) {
     throw new CalendarServerError(
-      "請先登入 Next@NTU",
+      "請重新登入 Next@NTU。",
       401
     );
   }
 
   const accessToken = match[1];
-  const admin = getCalendarAdmin();
 
   const { data, error } =
-    await admin.auth.getUser(accessToken);
+    await getCalendarAdmin().auth.getUser(
+      accessToken
+    );
 
   if (error || !data.user) {
     throw new CalendarServerError(
-      "登入已失效，請重新登入",
+      "登入已失效，請重新登入 Next@NTU。",
       401
     );
   }
@@ -186,15 +207,14 @@ export async function requireCalendarUser(
   };
 }
 
-// 修改資料的 API 只接受從本站送出的請求。
 export function requireCalendarOrigin(
   request: Request
-) {
+): void {
   const { origin } = getGoogleConfig();
 
-  if (request.headers.get("origin") !== origin) {
+  if (request.headers.get("Origin") !== origin) {
     throw new CalendarServerError(
-      "請從 Next@NTU 網站操作",
+      "請從 Next@NTU 網站操作。",
       403
     );
   }
@@ -215,12 +235,9 @@ export function hashOAuthSecret(
 export async function getOAuthBrowserSecret() {
   const cookieStore = await cookies();
 
-  return cookieStore.get(
-    GOOGLE_OAUTH_COOKIE
-  )?.value;
+  return cookieStore.get(GOOGLE_OAUTH_COOKIE)?.value;
 }
 
-// 每次連接都讓使用者選擇 Google 帳號並確認授權。
 export function buildGoogleAuthorizationUrl(
   state: string,
   codeVerifier: string
@@ -231,7 +248,11 @@ export function buildGoogleAuthorizationUrl(
     .update(codeVerifier)
     .digest("base64url");
 
-  const params = new URLSearchParams({
+  const url = new URL(
+    "https://accounts.google.com/o/oauth2/v2/auth"
+  );
+
+  url.search = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: "code",
@@ -241,18 +262,16 @@ export function buildGoogleAuthorizationUrl(
     state,
     code_challenge: challenge,
     code_challenge_method: "S256",
-  });
+  }).toString();
 
-  return (
-    "https://accounts.google.com/o/oauth2/v2/auth?" +
-    params.toString()
-  );
+  return url.toString();
 }
 
 async function requestGoogleTokens(
-  params: URLSearchParams
+  parameters: URLSearchParams
 ): Promise<GoogleTokenResponse> {
   let response: Response;
+  let raw: unknown;
 
   try {
     response = await fetch(
@@ -263,110 +282,122 @@ async function requestGoogleTokens(
           "Content-Type":
             "application/x-www-form-urlencoded",
         },
-        body: params.toString(),
+        body: parameters.toString(),
         cache: "no-store",
         signal: AbortSignal.timeout(15_000),
       }
     );
+
+    raw = await response.json();
   } catch {
     throw new CalendarServerError(
-      "無法連線到 Google，請稍後再試",
+      "Google 授權服務暫時無法連線，請稍後重試。",
       502
     );
   }
 
-  const data = (await response
-    .json()
-    .catch(() => null)) as
-    | GoogleTokenResponse
-    | null;
+  const result =
+    raw &&
+    typeof raw === "object" &&
+    !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
 
   if (!response.ok) {
-    if (data?.error === "invalid_grant") {
+    if (result?.error === "invalid_grant") {
       throw new CalendarServerError(
-        "Google 授權已失效，請重新連接日曆",
+        "Google 授權已失效，請重新連接 Google 帳號。",
         409
       );
     }
 
     throw new CalendarServerError(
-      "Google 授權失敗，請檢查設定或重新連接",
+      "Google 授權失敗，請確認 OAuth 設定後重新連接。",
       502
     );
   }
 
   if (
-    !data ||
-    typeof data.access_token !== "string" ||
-    !data.access_token ||
-    typeof data.expires_in !== "number" ||
-    !Number.isFinite(data.expires_in) ||
-    data.expires_in <= 0
+    !result ||
+    typeof result.access_token !== "string" ||
+    !result.access_token ||
+    typeof result.expires_in !== "number" ||
+    !Number.isFinite(result.expires_in) ||
+    result.expires_in <= 0 ||
+    (result.refresh_token !== undefined &&
+      typeof result.refresh_token !== "string") ||
+    (result.scope !== undefined &&
+      typeof result.scope !== "string")
   ) {
     throw new CalendarServerError(
-      "Google 回傳的授權資料不完整",
+      "Google 授權回應不完整，請重新連接。",
       502
     );
   }
 
-  return data;
+  return {
+    access_token: result.access_token,
+    expires_in: result.expires_in,
+    refresh_token: result.refresh_token as
+      | string
+      | undefined,
+    scope: result.scope as string | undefined,
+  };
 }
 
 export async function exchangeGoogleCode(
   code: string,
   codeVerifier: string
-) {
+): Promise<{
+  tokens: GoogleTokens;
+  scopes: string[];
+}> {
   const config = getGoogleConfig();
 
-  const data = await requestGoogleTokens(
+  const result = await requestGoogleTokens(
     new URLSearchParams({
+      grant_type: "authorization_code",
       client_id: config.clientId,
       client_secret: config.clientSecret,
       redirect_uri: config.redirectUri,
-      grant_type: "authorization_code",
       code,
       code_verifier: codeVerifier,
     })
   );
 
-  const scopes = (data.scope ?? "")
-    .split(/\s+/)
-    .filter(Boolean);
+  const scopes =
+    result.scope?.split(/\s+/).filter(Boolean) ?? [];
 
   if (!scopes.includes(GOOGLE_CALENDAR_SCOPE)) {
     throw new CalendarServerError(
-      "尚未授予日曆權限，請重新連接並允許日曆存取",
+      "尚未取得 Google 日曆權限，請重新連接並允許日曆授權。",
       403
     );
   }
 
-  if (
-    typeof data.refresh_token !== "string" ||
-    !data.refresh_token
-  ) {
+  if (!result.refresh_token) {
     throw new CalendarServerError(
-      "未取得持續授權，請重新連接 Google 日曆",
+      "未取得持續使用日曆所需的授權，請重新連接 Google 帳號。",
       409
     );
   }
 
-  const tokens: GoogleTokens = {
-    accessToken: data.access_token!,
-    refreshToken: data.refresh_token,
-    expiresAt:
-      Date.now() + data.expires_in! * 1000,
+  return {
+    tokens: {
+      accessToken: result.access_token,
+      refreshToken: result.refresh_token,
+      expiresAt:
+        Date.now() + result.expires_in * 1000,
+    },
+    scopes,
   };
-
-  return { tokens, scopes };
 }
 
 export async function getGoogleAccount(
   accessToken: string
-): Promise<{
-  subject: string;
-  email: string;
-}> {
+): Promise<GoogleAccount> {
   let response: Response;
+  let raw: unknown;
 
   try {
     response = await fetch(
@@ -379,38 +410,40 @@ export async function getGoogleAccount(
         signal: AbortSignal.timeout(15_000),
       }
     );
+
+    raw = await response.json();
   } catch {
     throw new CalendarServerError(
-      "無法確認 Google 帳號，請稍後重試",
+      "無法取得 Google 帳號資料，請重新連接。",
       502
     );
   }
 
-  const data = (await response
-    .json()
-    .catch(() => null)) as {
-    sub?: string;
-    email?: string;
-    email_verified?: boolean;
-  } | null;
+  const result =
+    raw &&
+    typeof raw === "object" &&
+    !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
 
   if (
     !response.ok ||
-    typeof data?.sub !== "string" ||
-    !data.sub ||
-    typeof data.email !== "string" ||
-    !data.email ||
-    data.email_verified !== true
+    !result ||
+    typeof result.sub !== "string" ||
+    !result.sub ||
+    typeof result.email !== "string" ||
+    !result.email ||
+    result.email_verified !== true
   ) {
     throw new CalendarServerError(
-      "無法取得已驗證的 Google 帳號",
+      "無法確認 Google 帳號，請使用已驗證的 Google 帳號重新授權。",
       502
     );
   }
 
   return {
-    subject: data.sub,
-    email: data.email,
+    subject: result.sub,
+    email: result.email,
   };
 }
 
@@ -419,31 +452,32 @@ function encryptionKey(): Buffer {
     "GOOGLE_CALENDAR_ENCRYPTION_KEY"
   );
 
-  if (!/^[a-f0-9]{64}$/i.test(value)) {
+  if (!/^[0-9a-f]{64}$/i.test(value)) {
     throw new CalendarServerError(
-      "加密金鑰必須是 64 個十六進位字元"
+      "GOOGLE_CALENDAR_ENCRYPTION_KEY 必須是 64 位十六進位字串。",
+      500
     );
   }
 
   return Buffer.from(value, "hex");
 }
 
-function encryptTokens(
+export function encryptTokens(
   tokens: GoogleTokens,
   userId: string
 ): string {
+  const key = encryptionKey();
   const iv = randomBytes(12);
 
   const cipher = createCipheriv(
     "aes-256-gcm",
-    encryptionKey(),
+    key,
     iv
   );
 
-  // 將憑證綁定到所屬 Next@NTU 使用者。
   cipher.setAAD(Buffer.from(userId, "utf8"));
 
-  const ciphertext = Buffer.concat([
+  const encrypted = Buffer.concat([
     cipher.update(
       JSON.stringify(tokens),
       "utf8"
@@ -451,42 +485,42 @@ function encryptTokens(
     cipher.final(),
   ]);
 
+  const tag = cipher.getAuthTag();
+
   return [
     "v1",
     iv.toString("base64url"),
-    cipher.getAuthTag().toString("base64url"),
-    ciphertext.toString("base64url"),
+    tag.toString("base64url"),
+    encrypted.toString("base64url"),
   ].join(".");
 }
 
-function decryptTokens(
-  encrypted: string,
+export function decryptTokens(
+  encryptedValue: string,
   userId: string
 ): GoogleTokens {
   const key = encryptionKey();
 
   try {
-    const parts = encrypted.split(".");
+    const parts = encryptedValue.split(".");
 
-    if (
-      parts.length !== 4 ||
-      parts[0] !== "v1"
-    ) {
-      throw new Error("Invalid token format");
+    if (parts.length !== 4 || parts[0] !== "v1") {
+      throw new Error("Invalid encrypted format");
     }
 
-    const iv = Buffer.from(
-      parts[1],
+    const iv = Buffer.from(parts[1], "base64url");
+    const tag = Buffer.from(parts[2], "base64url");
+    const encrypted = Buffer.from(
+      parts[3],
       "base64url"
     );
 
-    const tag = Buffer.from(
-      parts[2],
-      "base64url"
-    );
-
-    if (iv.length !== 12 || tag.length !== 16) {
-      throw new Error("Invalid encryption data");
+    if (
+      iv.length !== 12 ||
+      tag.length !== 16 ||
+      encrypted.length === 0
+    ) {
+      throw new Error("Invalid encrypted data");
     }
 
     const decipher = createDecipheriv(
@@ -495,22 +529,25 @@ function decryptTokens(
       iv
     );
 
-    decipher.setAAD(
-      Buffer.from(userId, "utf8")
-    );
-
+    decipher.setAAD(Buffer.from(userId, "utf8"));
     decipher.setAuthTag(tag);
 
-    const plaintext = Buffer.concat([
-      decipher.update(
-        Buffer.from(parts[3], "base64url")
-      ),
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
       decipher.final(),
     ]).toString("utf8");
 
-    const tokens = JSON.parse(
-      plaintext
-    ) as GoogleTokens;
+    const raw: unknown = JSON.parse(decrypted);
+
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      Array.isArray(raw)
+    ) {
+      throw new Error("Invalid token data");
+    }
+
+    const tokens = raw as Record<string, unknown>;
 
     if (
       typeof tokens.accessToken !== "string" ||
@@ -520,13 +557,17 @@ function decryptTokens(
       typeof tokens.expiresAt !== "number" ||
       !Number.isFinite(tokens.expiresAt)
     ) {
-      throw new Error("Invalid token contents");
+      throw new Error("Incomplete token data");
     }
 
-    return tokens;
+    return {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt,
+    };
   } catch {
     throw new CalendarServerError(
-      "無法讀取 Google 授權，請重新連接日曆",
+      "無法讀取 Google 授權資料，請重新連接 Google 帳號。",
       409
     );
   }
@@ -537,35 +578,28 @@ export async function readGoogleConnection(
 ): Promise<GoogleConnection | null> {
   const { data, error } = await getCalendarAdmin()
     .from("google_calendar_connections")
-    .select(
-      "user_id,connection_id,google_subject," +
-        "google_email,tokens_encrypted," +
-        "granted_scopes,created_at,updated_at"
-    )
+    .select(CONNECTION_COLUMNS)
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) {
     throw new CalendarServerError(
-      "無法讀取 Google 日曆連接資料",
+      "無法讀取 Google 連接資料，請稍後重試。",
       503
     );
   }
 
-  return data as GoogleConnection | null;
+  return data
+    ? (data as unknown as GoogleConnection)
+    : null;
 }
 
 export async function saveGoogleConnection(
   userId: string,
-  account: {
-    subject: string;
-    email: string;
-  },
+  account: GoogleAccount,
   tokens: GoogleTokens,
   scopes: string[]
-) {
-  const now = new Date().toISOString();
-
+): Promise<void> {
   const { error } = await getCalendarAdmin()
     .from("google_calendar_connections")
     .upsert(
@@ -578,30 +612,34 @@ export async function saveGoogleConnection(
           tokens,
           userId
         ),
-        granted_scopes: scopes,
-        updated_at: now,
+        granted_scopes: [...new Set(scopes)],
+        updated_at: new Date().toISOString(),
       },
-      { onConflict: "user_id" }
+      {
+        onConflict: "user_id",
+      }
     );
 
   if (error) {
     throw new CalendarServerError(
-      "Google 授權保存失敗，請重新連接",
+      "Google 授權資料儲存失敗，請重新連接。",
       503
     );
   }
 }
 
-// 即將到期時，以 refresh token 更新授權。
 export async function getGoogleAccessToken(
   userId: string
-) {
+): Promise<{
+  accessToken: string;
+  connection: GoogleConnection;
+}> {
   const connection =
     await readGoogleConnection(userId);
 
   if (!connection) {
     throw new CalendarServerError(
-      "請先連接 Google 日曆",
+      "請先連接 Google 日曆。",
       409
     );
   }
@@ -612,7 +650,7 @@ export async function getGoogleAccessToken(
     )
   ) {
     throw new CalendarServerError(
-      "Google 日曆權限不足，請重新連接",
+      "Google 日曆權限不足，請重新授權。",
       403
     );
   }
@@ -622,6 +660,7 @@ export async function getGoogleAccessToken(
     userId
   );
 
+  // 保留一分鐘餘裕，避免請求途中過期。
   if (tokens.expiresAt > Date.now() + 60_000) {
     return {
       accessToken: tokens.accessToken,
@@ -631,33 +670,36 @@ export async function getGoogleAccessToken(
 
   const config = getGoogleConfig();
 
-  const refreshed = await requestGoogleTokens(
+  const result = await requestGoogleTokens(
     new URLSearchParams({
+      grant_type: "refresh_token",
       client_id: config.clientId,
       client_secret: config.clientSecret,
-      grant_type: "refresh_token",
       refresh_token: tokens.refreshToken,
     })
   );
 
-  const nextTokens: GoogleTokens = {
-    accessToken: refreshed.access_token!,
+  const refreshedTokens: GoogleTokens = {
+    accessToken: result.access_token,
     refreshToken:
-      refreshed.refresh_token ||
-      tokens.refreshToken,
+      result.refresh_token || tokens.refreshToken,
     expiresAt:
-      Date.now() +
-      refreshed.expires_in! * 1000,
+      Date.now() + result.expires_in * 1000,
   };
 
+  const encrypted = encryptTokens(
+    refreshedTokens,
+    userId
+  );
+
+  const updatedAt = new Date().toISOString();
+
+  // 只更新原本的連接，避免覆蓋剛更換的 Google 帳號。
   const { data, error } = await getCalendarAdmin()
     .from("google_calendar_connections")
     .update({
-      tokens_encrypted: encryptTokens(
-        nextTokens,
-        userId
-      ),
-      updated_at: new Date().toISOString(),
+      tokens_encrypted: encrypted,
+      updated_at: updatedAt,
     })
     .eq("user_id", userId)
     .eq(
@@ -669,39 +711,42 @@ export async function getGoogleAccessToken(
 
   if (error) {
     throw new CalendarServerError(
-      "無法更新 Google 授權，請稍後重試",
+      "Google 授權更新失敗，請稍後重試。",
       503
     );
   }
 
   if (!data) {
     throw new CalendarServerError(
-      "Google 連接已變更，請重新操作",
+      "Google 帳號已變更，請重新確認帳號後再操作。",
       409
     );
   }
 
   return {
-    accessToken: nextTokens.accessToken,
-    connection,
+    accessToken: refreshedTokens.accessToken,
+    connection: {
+      ...connection,
+      tokens_encrypted: encrypted,
+      updated_at: updatedAt,
+    },
   };
 }
 
-// API 使用統一錯誤格式，避免傳出憑證內容。
 export function calendarErrorResponse(
   error: unknown
 ): Response {
-  const known =
+  const knownError =
     error instanceof CalendarServerError;
 
   return Response.json(
     {
-      error: known
+      error: knownError
         ? error.message
-        : "Google 日曆操作失敗，請稍後重試",
+        : "Google 日曆操作失敗，請稍後重試。",
     },
     {
-      status: known ? error.status : 500,
+      status: knownError ? error.status : 500,
       headers: {
         "Cache-Control": "no-store",
       },
