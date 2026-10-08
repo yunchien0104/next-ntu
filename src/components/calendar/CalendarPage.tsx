@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -16,6 +17,7 @@ import {
   Modal,
 } from "@/components/ui/Modal";
 
+import { supabase } from "@/lib/supabase";
 import {
   sortCareerTasks,
   type CareerTask,
@@ -37,6 +39,26 @@ interface CalendarForm {
   notes: string;
 }
 
+interface GoogleStatus {
+  connected: boolean;
+  email: string | null;
+  connectionId: string | null;
+  needsReconnect: boolean;
+}
+
+interface ImportResult {
+  success: boolean;
+  email: string;
+  alreadyImported: boolean;
+}
+
+const emptyGoogleStatus: GoogleStatus = {
+  connected: false,
+  email: null,
+  connectionId: null,
+  needsReconnect: false,
+};
+
 function getTaipeiToday(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Taipei",
@@ -51,7 +73,6 @@ function getTaipeiToday(): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-// 使用 UTC 做日曆格子的日期計算，避免瀏覽器時區影響。
 function monthFor(date: string): Date {
   const value = new Date(`${date}T00:00:00Z`);
 
@@ -64,10 +85,6 @@ function monthFor(date: string): Date {
   );
 }
 
-function dateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function emptyForm(date: string): CalendarForm {
   return {
     title: "",
@@ -78,37 +95,30 @@ function emptyForm(date: string): CalendarForm {
   };
 }
 
-function googleCalendarUrl(
-  form: CalendarForm,
-  guests: string[]
-): string {
-  // 明確將輸入的時間解讀為台灣時間。
-  const start = new Date(
-    `${form.date}T${form.time}:00+08:00`
-  );
+function taskToForm(task: CareerTask): CalendarForm {
+  return {
+    title: task.title,
+    date: task.date,
+    time: task.time,
+    guests: task.guests.join(", "),
+    notes: task.notes,
+  };
+}
 
-  // Google 活動預設為一小時，也能正確跨越午夜。
-  const end = new Date(
-    start.getTime() + 60 * 60 * 1000
-  );
+function formatTimestamp(value: string): string {
+  const date = new Date(value);
 
-  const compact = (value: Date) =>
-    value
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}Z$/, "Z");
+  if (Number.isNaN(date.getTime())) return "未提供";
 
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: form.title.trim(),
-    dates: `${compact(start)}/${compact(end)}`,
-    ctz: "Asia/Taipei",
-    details: form.notes.trim() || "由 Next@NTU 建立",
-  });
-
-  guests.forEach((email) => params.append("add", email));
-
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  return new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function taskClass(task: CareerTask): string {
@@ -123,6 +133,12 @@ function taskClass(task: CareerTask): string {
   return "bg-[var(--paper)] text-[var(--paper-ink)]";
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "操作失敗，請稍後重試";
+}
+
 export function CalendarPage({
   taskStore,
   notify,
@@ -130,30 +146,211 @@ export function CalendarPage({
   onDraftConsumed,
 }: CalendarPageProps) {
   const [today, setToday] = useState(getTaipeiToday);
-
   const [cursor, setCursor] = useState(
     () => monthFor(getTaipeiToday())
   );
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] =
+    useState<string | null>(null);
 
   const [form, setForm] = useState<CalendarForm>(
     () => emptyForm(getTaipeiToday())
   );
 
-  const [submitting, setSubmitting] = useState(false);
-  const [googleLink, setGoogleLink] = useState("");
+  const [operation, setOperation] =
+    useState<"save" | "delete" | "export" | null>(null);
+
+  const [localError, setLocalError] = useState("");
+  const [inviteGuests, setInviteGuests] = useState(false);
+
+  const [googleStatus, setGoogleStatus] =
+    useState<GoogleStatus>(emptyGoogleStatus);
+
+  const [googleLoading, setGoogleLoading] = useState(true);
+  const [googleConnecting, setGoogleConnecting] =
+    useState(false);
+
+  const [googleError, setGoogleError] = useState("");
+  const [googleNotice, setGoogleNotice] = useState("");
 
   const formRef = useRef<HTMLFormElement>(null);
-  const submittingRef = useRef(false);
+  const operationRef = useRef(false);
+  const connectingRef = useRef(false);
+  const aliveRef = useRef(false);
+  const statusRevisionRef = useRef(0);
+  const ownerRef = useRef<string | null>(null);
+
+  const editingTask =
+    taskStore.tasks.find((task) => task.id === editingId) ??
+    null;
+
+  const missingTask =
+    editingId !== null && editingTask === null;
 
   const blocked =
     !taskStore.ready ||
     taskStore.loading ||
     taskStore.busy ||
-    submitting;
+    operation !== null ||
+    googleConnecting;
 
-  // 網頁跨過午夜時，更新今天的標記。
+  const mutationBlocked = blocked || missingTask;
+
+  const canImport =
+    googleStatus.connected &&
+    Boolean(googleStatus.connectionId) &&
+    !googleLoading;
+
+  // 每次請求都取得目前有效的 Supabase 登入憑證。
+  const requestGoogle = useCallback(
+    async <T,>(
+      path: string,
+      method: "GET" | "POST" = "GET",
+      body?: Record<string, unknown>
+    ): Promise<T> => {
+      const { data, error } =
+        await supabase.auth.getSession();
+
+      if (error || !data.session) {
+        throw new Error("請重新登入 Next@NTU");
+      }
+
+      const session = data.session;
+
+      if (
+        ownerRef.current &&
+        ownerRef.current !== session.user.id
+      ) {
+        throw new Error("登入帳號已變更，請重新開啟日曆");
+      }
+
+      ownerRef.current = session.user.id;
+
+      let response: Response;
+
+      try {
+        response = await fetch(path, {
+          method,
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            ...(body
+              ? { "Content-Type": "application/json" }
+              : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: AbortSignal.timeout(45_000),
+        });
+      } catch {
+        throw new Error(
+          "連線中斷或逾時，請稍後重試同一筆操作"
+        );
+      }
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          typeof result?.error === "string"
+            ? result.error
+            : "Google 日曆操作失敗，請稍後重試"
+        );
+      }
+
+      if (!result) {
+        throw new Error("伺服器回應不完整，請稍後重試");
+      }
+
+      return result as T;
+    },
+    []
+  );
+
+  const loadGoogleStatus = useCallback(async () => {
+    const revision = ++statusRevisionRef.current;
+
+    setGoogleLoading(true);
+    setGoogleError("");
+
+    try {
+      const result = await requestGoogle<GoogleStatus>(
+        "/api/google/calendar/status"
+      );
+
+      if (
+        typeof result.connected !== "boolean" ||
+        typeof result.needsReconnect !== "boolean" ||
+        (result.connected &&
+          (typeof result.email !== "string" ||
+            typeof result.connectionId !== "string"))
+      ) {
+        throw new Error("Google 連接資料不完整");
+      }
+
+      if (
+        !aliveRef.current ||
+        revision !== statusRevisionRef.current
+      ) {
+        return;
+      }
+
+      setGoogleStatus(result);
+    } catch (error) {
+      if (
+        aliveRef.current &&
+        revision === statusRevisionRef.current
+      ) {
+        setGoogleStatus(emptyGoogleStatus);
+        setGoogleError(errorMessage(error));
+      }
+    } finally {
+      if (
+        aliveRef.current &&
+        revision === statusRevisionRef.current
+      ) {
+        setGoogleLoading(false);
+      }
+    }
+  }, [requestGoogle]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    void loadGoogleStatus();
+
+    // 顯示 Google 授權回呼結果。
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get("googleCalendar");
+    const message = url.searchParams.get(
+      "googleCalendarMessage"
+    );
+
+    if (result === "connected") {
+      setGoogleNotice("Google 日曆已連接，請確認下方帳號。");
+    } else if (result === "cancelled") {
+      setGoogleNotice(message || "你已取消 Google 日曆授權");
+    } else if (result === "error") {
+      setGoogleNotice(message || "Google 日曆連接失敗");
+    }
+
+    if (result) {
+      url.searchParams.delete("googleCalendar");
+      url.searchParams.delete("googleCalendarMessage");
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
+    }
+
+    return () => {
+      aliveRef.current = false;
+      statusRevisionRef.current++;
+    };
+  }, [loadGoogleStatus]);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setToday(getTaipeiToday());
@@ -162,53 +359,52 @@ export function CalendarPage({
     return () => window.clearInterval(timer);
   }, []);
 
-  // 從人才庫帶入 Coffee chat 草稿。
   useEffect(() => {
     if (
       !draftTitle ||
-      submitting ||
-      taskStore.busy
+      operation !== null ||
+      taskStore.busy ||
+      googleConnecting
     ) {
       return;
     }
 
     const date = getTaipeiToday();
 
+    setEditingId(null);
+    setLocalError("");
+    setInviteGuests(false);
     setForm({
       ...emptyForm(date),
       title: draftTitle,
-      notes:
-        "想了解你的學習／職涯路徑，預計 20–30 分鐘。",
+      notes: "想了解你的學習／職涯路徑，預計 20–30 分鐘。",
     });
-
     setCursor(monthFor(date));
     setModalOpen(true);
     onDraftConsumed();
   }, [
     draftTitle,
     onDraftConsumed,
-    submitting,
+    operation,
     taskStore.busy,
+    googleConnecting,
   ]);
 
   const cells = useMemo(() => {
     const year = cursor.getUTCFullYear();
     const month = cursor.getUTCMonth();
-
     const first = new Date(Date.UTC(year, month, 1));
-
     const start = new Date(
       Date.UTC(year, month, 1 - first.getUTCDay())
     );
 
     return Array.from({ length: 42 }, (_, index) => {
       const date = new Date(start);
-
       date.setUTCDate(start.getUTCDate() + index);
 
       return {
         date,
-        key: dateKey(date),
+        key: date.toISOString().slice(0, 10),
         outside: date.getUTCMonth() !== month,
       };
     });
@@ -226,16 +422,84 @@ export function CalendarPage({
     return grouped;
   }, [taskStore.tasks]);
 
-  function open(date = getTaipeiToday()) {
-    if (blocked) return;
+  async function connectGoogle() {
+    if (
+      blocked ||
+      modalOpen ||
+      operationRef.current ||
+      connectingRef.current
+    ) {
+      return;
+    }
 
+    connectingRef.current = true;
+    setGoogleConnecting(true);
+    setGoogleError("");
+    setGoogleNotice("");
+
+    let navigating = false;
+
+    try {
+      const result = await requestGoogle<{ url: string }>(
+        "/api/google/calendar/connect",
+        "POST"
+      );
+
+      const url = new URL(result.url);
+
+      if (
+        url.origin !== "https://accounts.google.com" ||
+        url.pathname !== "/o/oauth2/v2/auth"
+      ) {
+        throw new Error("Google 授權網址不正確");
+      }
+
+      if (!aliveRef.current) return;
+
+      window.location.assign(url.toString());
+      navigating = true;
+    } catch (error) {
+      if (aliveRef.current) {
+        setGoogleError(errorMessage(error));
+      }
+    } finally {
+      if (!navigating) {
+        connectingRef.current = false;
+
+        if (aliveRef.current) {
+          setGoogleConnecting(false);
+        }
+      }
+    }
+  }
+
+  function openNew(date = getTaipeiToday()) {
+    if (blocked || operationRef.current) return;
+
+    setEditingId(null);
+    setLocalError("");
+    setInviteGuests(false);
     setForm(emptyForm(date));
     setModalOpen(true);
   }
 
+  function openTask(task: CareerTask) {
+    if (blocked || operationRef.current) return;
+
+    setEditingId(task.id);
+    setLocalError("");
+    setInviteGuests(false);
+    setForm(taskToForm(task));
+    setModalOpen(true);
+  }
+
   function closeModal() {
-    if (taskStore.busy || submittingRef.current) return;
+    if (taskStore.busy || operationRef.current) return;
+
     setModalOpen(false);
+    setEditingId(null);
+    setLocalError("");
+    setInviteGuests(false);
   }
 
   function changeMonth(offset: number) {
@@ -253,18 +517,36 @@ export function CalendarPage({
 
   function goToday() {
     const date = getTaipeiToday();
-
     setToday(date);
     setCursor(monthFor(date));
   }
 
-  async function save(google = false) {
-    if (blocked || submittingRef.current) return;
+  function updateField(
+    field: keyof CalendarForm,
+    value: string
+  ) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function save(importToGoogle = false) {
+    if (mutationBlocked || operationRef.current) return;
+
+    setLocalError("");
 
     if (!formRef.current?.reportValidity()) return;
 
     if (!form.title.trim()) {
-      notify("請填寫任務名稱");
+      setLocalError("請填寫任務名稱");
+      return;
+    }
+
+    if (importToGoogle && !canImport) {
+      setLocalError(
+        "請先儲存任務，再到日曆頁面連接 Google 帳號。"
+      );
       return;
     }
 
@@ -272,95 +554,196 @@ export function CalendarPage({
       ...new Set(
         form.guests
           .split(/[,，]/)
-          .map((item) => item.trim())
+          .map((email) => email.trim().toLowerCase())
           .filter(Boolean)
       ),
     ];
 
     if (
       guests.some(
-        (email) =>
-          !/^[^\s@,]+@gmail\.com$/i.test(email)
+        (email) => !/^[^\s@,]+@gmail\.com$/i.test(email)
       )
     ) {
-      notify("協作者請輸入有效的 Gmail 帳號");
+      setLocalError("協作者請輸入有效的 Gmail 帳號");
       return;
     }
 
-    const start = new Date(
-      `${form.date}T${form.time}:00+08:00`
-    );
+    const parsedDate = new Date(`${form.date}T00:00:00Z`);
 
-    if (Number.isNaN(start.getTime())) {
-      notify("請填寫有效的日期與時間");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(form.date) ||
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.toISOString().slice(0, 10) !== form.date ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(form.time)
+    ) {
+      setLocalError("請填寫有效的日期與時間");
       return;
     }
 
-    const submittedForm = { ...form };
+    const targetId = editingId;
+    const expectedConnectionId = googleStatus.connectionId;
+    const shouldInvite = inviteGuests;
 
-    const url = google
-      ? googleCalendarUrl(submittedForm, guests)
-      : "";
+    const input = {
+      title: form.title.trim(),
+      date: form.date,
+      time: form.time,
+      guests,
+      notes: form.notes,
+    };
 
-    // 在點擊時先開啟分頁，避免等待儲存後被擋彈出視窗。
-    let googleWindow: Window | null = null;
+    let savedTask: CareerTask | null = null;
 
-    if (google) {
-      googleWindow = window.open("about:blank", "_blank");
-
-      if (googleWindow) {
-        googleWindow.opener = null;
-      }
-    }
-
-    submittingRef.current = true;
-    setSubmitting(true);
+    operationRef.current = true;
+    setOperation("save");
 
     try {
-      const task = await taskStore.createTask({
-        title: submittedForm.title.trim(),
-        date: submittedForm.date,
-        time: submittedForm.time,
-        guests,
-        notes: submittedForm.notes,
-        source: "calendar",
-      });
+      savedTask =
+        targetId !== null
+          ? await taskStore.updateTask(targetId, input)
+          : await taskStore.createTask({
+              ...input,
+              source: "calendar",
+            });
 
-      if (!task) {
-        googleWindow?.close();
-        notify("新增失敗，請保留內容並重試");
-        return;
+      if (!savedTask) {
+        throw new Error("任務儲存失敗，內容已保留，請重試。");
       }
 
-      setCursor(monthFor(task.date));
-      setModalOpen(false);
-      setForm(emptyForm(getTaipeiToday()));
-      setGoogleLink(url);
+      if (!aliveRef.current) return;
 
-      notify("已加入日曆與生涯待辦");
+      setCursor(monthFor(savedTask.date));
 
-      if (googleWindow && !googleWindow.closed) {
-        try {
-          googleWindow.location.replace(url);
-        } catch {
-          googleWindow.close();
-          notify("任務已儲存，請按頁面上的 Google 連結");
+      // 先記住已保存的任務 ID。
+      // Google 匯入失敗時，重試會沿用同一筆任務。
+      setEditingId(savedTask.id);
+      setForm(taskToForm(savedTask));
+
+      if (importToGoogle) {
+        setOperation("export");
+
+        const result = await requestGoogle<ImportResult>(
+          "/api/google/calendar/events",
+          "POST",
+          {
+            taskId: savedTask.id,
+            connectionId: expectedConnectionId,
+            inviteGuests: shouldInvite,
+          }
+        );
+
+        if (
+          result.success !== true ||
+          typeof result.email !== "string" ||
+          typeof result.alreadyImported !== "boolean"
+        ) {
+          throw new Error("無法確認 Google 匯入結果，請重試。");
         }
-      } else if (google) {
-        notify("任務已儲存，請按頁面上的 Google 連結");
+
+        if (!aliveRef.current) return;
+
+        setGoogleNotice(
+          result.alreadyImported
+            ? `這筆任務已匯入 ${result.email}，未重複新增或修改 Google 活動。`
+            : `已匯入 ${result.email} 的 Google 日曆。`
+        );
+
+        notify(
+          result.alreadyImported
+            ? "這筆任務已匯入 Google 日曆"
+            : "已儲存並匯入 Google 日曆"
+        );
+      } else {
+        notify(
+          targetId !== null
+            ? "已更新日曆與生涯待辦"
+            : "已加入日曆與生涯待辦"
+        );
       }
+
+      setModalOpen(false);
+      setEditingId(null);
+      setForm(emptyForm(getTaipeiToday()));
+      setInviteGuests(false);
+    } catch (error) {
+      if (!aliveRef.current) return;
+
+      const message = errorMessage(error);
+
+      setLocalError(
+        savedTask
+          ? `任務已存入 Next@NTU，但 Google 匯入未完成：${message} 你可以在這個視窗重試，不會另建一筆任務。`
+          : message
+      );
+
+      notify(
+        savedTask
+          ? "任務已儲存，Google 匯入未完成"
+          : "任務儲存失敗"
+      );
     } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      operationRef.current = false;
+
+      if (aliveRef.current) {
+        setOperation(null);
+      }
     }
   }
 
-  function handleSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  async function deleteCurrentTask() {
+    if (
+      !editingId ||
+      mutationBlocked ||
+      operationRef.current
+    ) {
+      return;
+    }
+
+    operationRef.current = true;
+    setOperation("delete");
+    setLocalError("");
+
+    try {
+      const success =
+        await taskStore.deleteTask(editingId);
+
+      if (!success) {
+        throw new Error("刪除失敗，任務仍保留，請重試。");
+      }
+
+      if (!aliveRef.current) return;
+
+      setModalOpen(false);
+      setEditingId(null);
+      setForm(emptyForm(getTaipeiToday()));
+      setInviteGuests(false);
+      notify("已從日曆與生涯待辦刪除任務");
+    } catch (error) {
+      if (aliveRef.current) {
+        setLocalError(errorMessage(error));
+        notify("任務刪除失敗");
+      }
+    } finally {
+      operationRef.current = false;
+
+      if (aliveRef.current) {
+        setOperation(null);
+      }
+    }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void save(false);
   }
+
+  const connectLabel = googleConnecting
+    ? "正在開啟 Google…"
+    : googleStatus.needsReconnect
+      ? "重新授權 Google 日曆"
+      : googleStatus.connected
+        ? "更換 Google 帳號"
+        : "連接 Google 日曆";
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg)]">
@@ -375,53 +758,79 @@ export function CalendarPage({
             <Button
               variant="primary"
               disabled={blocked}
-              onClick={() => open()}
+              onClick={() => openNew()}
             >
               ＋ 建立任務
             </Button>
-
-            <Button onClick={() => changeMonth(-1)}>
-              ←
-            </Button>
-
-            <Button onClick={goToday}>
-              今天
-            </Button>
-
-            <Button onClick={() => changeMonth(1)}>
-              →
-            </Button>
-
+            <Button onClick={() => changeMonth(-1)}>←</Button>
+            <Button onClick={goToday}>今天</Button>
+            <Button onClick={() => changeMonth(1)}>→</Button>
             <Button
-              variant="primary"
-              onClick={() =>
-                window.open(
-                  "https://calendar.google.com/calendar/u/0/r",
-                  "_blank",
-                  "noopener,noreferrer"
-                )
-              }
+              disabled={blocked || modalOpen || googleLoading}
+              onClick={() => void connectGoogle()}
             >
-              Google Calendar ↗
+              {connectLabel}
             </Button>
           </>
         }
       />
 
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] bg-[var(--panel)] px-5 py-3">
+        <div className="min-w-0 text-xs">
+          <p className="break-all text-[var(--text)]">
+            {googleLoading
+              ? "正在確認 Google 日曆帳號…"
+              : googleStatus.connected
+                ? `已連接：${googleStatus.email}`
+                : googleStatus.needsReconnect
+                  ? `需要重新授權：${googleStatus.email}`
+                  : "尚未連接 Google 日曆"}
+          </p>
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            匯入活動會寫入此授權帳號的主要日曆。
+          </p>
+        </div>
+
+        <Button
+          disabled={blocked || googleLoading}
+          onClick={() => void loadGoogleStatus()}
+        >
+          重新確認帳號
+        </Button>
+      </div>
+
+      {googleNotice && (
+        <p
+          role="status"
+          className="border-b border-[var(--line)] px-5 py-3 text-xs leading-6 text-[var(--soft)]"
+        >
+          {googleNotice}
+        </p>
+      )}
+
+      {googleError && (
+        <p
+          role="alert"
+          className="border-b border-[var(--line)] px-5 py-3 text-xs leading-6 text-red-400"
+        >
+          Google 日曆：{googleError}
+        </p>
+      )}
+
       {taskStore.error && (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] bg-[var(--panel)] px-5 py-3"
+          className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-3"
         >
           <p className="break-words text-xs text-[var(--soft)]">
             任務同步失敗：{taskStore.error}
           </p>
-
           <Button
             disabled={
               taskStore.loading ||
               taskStore.busy ||
-              submitting
+              operation !== null ||
+              googleConnecting
             }
             onClick={() => void taskStore.reload()}
           >
@@ -439,26 +848,13 @@ export function CalendarPage({
         </p>
       )}
 
-      {googleLink && (
-        <div className="border-b border-[var(--line)] px-5 py-3 text-xs">
-          <a
-            href={googleLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-4"
-          >
-            開啟剛新增任務的 Google Calendar 建立頁 ↗
-          </a>
-        </div>
-      )}
-
       <div className="grid min-h-[680px] lg:grid-cols-[230px_1fr]">
         <aside className="border-b border-[var(--line)] bg-[var(--panel)] p-5 lg:border-r lg:border-b-0">
           <Button
             variant="primary"
             full
             disabled={blocked}
-            onClick={() => open()}
+            onClick={() => openNew()}
           >
             ＋ 建立任務
           </Button>
@@ -472,12 +868,10 @@ export function CalendarPage({
               <span className="h-2 w-2 bg-[var(--paper)]" />
               日曆活動
             </div>
-
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 bg-[#777]" />
               協作任務
             </div>
-
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 bg-[#333] ring-1 ring-[#777]" />
               生涯待辦
@@ -485,37 +879,31 @@ export function CalendarPage({
           </div>
 
           <p className="mt-7 border border-[var(--line)] p-3 text-[10px] leading-5 text-[var(--muted)]">
-            日曆與生涯待辦共用同一份任務。
-            在待辦按 X 刪除後，日曆也會移除該項目。
-            日期與時間以台灣時間為準。
+            點擊任務可查看詳情、修改或刪除。
+            點擊日期空白處可新增任務。
+            修改會同步到生涯待辦，時間以台灣時間為準。
           </p>
 
           <p className="mt-3 border border-[var(--line)] p-3 text-[10px] leading-5 text-[var(--muted)]">
-            選擇「加入並帶到 Google」會開啟 Google Calendar
-            建立頁，由你確認儲存與送出邀請。
-            在 Next@NTU 刪除任務，不會刪除你另外儲存的 Google 活動。
+            先連接 Google 帳號，再於任務視窗按「儲存並匯入 Google」。
+            活動長度為一小時。
+            Next@NTU 後續修改與刪除不會同步到 Google 活動。
           </p>
         </aside>
 
         <section className="min-w-0 overflow-x-auto p-3 md:p-5">
           <div className="min-w-[760px]">
             <div className="grid grid-cols-7 border-t border-l border-[var(--line)]">
-              {[
-                "Sun",
-                "Mon",
-                "Tue",
-                "Wed",
-                "Thu",
-                "Fri",
-                "Sat",
-              ].map((day) => (
-                <span
-                  key={day}
-                  className="border-r border-b border-[var(--line)] p-2 text-center font-mono text-[9px] text-[var(--muted)]"
-                >
-                  {day}
-                </span>
-              ))}
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                (day) => (
+                  <span
+                    key={day}
+                    className="border-r border-b border-[var(--line)] p-2 text-center font-mono text-[9px] text-[var(--muted)]"
+                  >
+                    {day}
+                  </span>
+                )
+              )}
             </div>
 
             <div className="grid grid-cols-7 border-l border-[var(--line)]">
@@ -524,20 +912,22 @@ export function CalendarPage({
                 const events = eventsByDate.get(cell.key) ?? [];
 
                 return (
-                  <button
+                  <div
                     key={cell.key}
-                    type="button"
-                    aria-label={`${cell.key}，${events.length} 個任務，點擊新增`}
-                    disabled={blocked}
-                    className={`flex min-h-24 min-w-0 flex-col items-stretch border-r border-b border-[var(--line)] p-2 text-left transition hover:bg-[var(--panel-2)] disabled:cursor-default ${
+                    className={`relative isolate flex min-h-24 min-w-0 flex-col border-r border-b border-[var(--line)] p-2 ${
                       cell.outside ? "opacity-40" : ""
-                    } ${
-                      isToday ? "bg-[var(--panel)]" : ""
-                    }`}
-                    onClick={() => open(cell.key)}
+                    } ${isToday ? "bg-[var(--panel)]" : ""}`}
                   >
+                    <button
+                      type="button"
+                      aria-label={`在 ${cell.key} 新增任務`}
+                      disabled={blocked}
+                      className="absolute inset-0 z-0 transition hover:bg-[var(--panel-2)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--paper)] disabled:cursor-default"
+                      onClick={() => openNew(cell.key)}
+                    />
+
                     <span
-                      className={`grid h-6 w-6 place-items-center text-[10px] ${
+                      className={`pointer-events-none relative z-10 grid h-6 w-6 place-items-center text-[10px] ${
                         isToday
                           ? "bg-[var(--paper)] text-[var(--paper-ink)]"
                           : "text-[var(--muted)]"
@@ -546,27 +936,29 @@ export function CalendarPage({
                       {cell.date.getUTCDate()}
                     </span>
 
-                    <span className="mt-1 grid w-full min-w-0 gap-1">
+                    <div className="pointer-events-none relative z-10 mt-1 grid min-w-0 gap-1">
                       {events.map((item) => (
-                        <span
+                        <button
                           key={item.id}
+                          type="button"
+                          disabled={blocked}
+                          aria-label={`查看任務：${item.title}`}
                           title={`${item.time} ${item.title}${
                             item.done ? "（已完成）" : ""
                           }`}
-                          className={`block truncate px-1.5 py-1 text-[9px] ${taskClass(
+                          className={`pointer-events-auto block w-full min-w-0 truncate px-1.5 py-1 text-left text-[9px] transition hover:brightness-125 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--paper)] disabled:cursor-default ${taskClass(
                             item
                           )} ${
-                            item.done
-                              ? "opacity-50 line-through"
-                              : ""
+                            item.done ? "opacity-50 line-through" : ""
                           }`}
+                          onClick={() => openTask(item)}
                         >
                           {item.done ? "✓ " : ""}
                           {item.time} {item.title}
-                        </span>
+                        </button>
                       ))}
-                    </span>
-                  </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -576,30 +968,50 @@ export function CalendarPage({
 
       <Modal
         open={modalOpen}
-        title="建立日曆任務"
+        title={
+          editingId !== null
+            ? "任務詳情與編輯"
+            : "建立日曆任務"
+        }
         onClose={closeModal}
         footer={
           <>
+            {editingId !== null && (
+              <Button
+                className="border-red-400/40 text-red-400"
+                disabled={mutationBlocked}
+                onClick={() => void deleteCurrentTask()}
+              >
+                {operation === "delete" ? "刪除中…" : "刪除任務"}
+              </Button>
+            )}
+
             <Button
-              disabled={taskStore.busy || submitting}
+              disabled={taskStore.busy || operation !== null}
               onClick={closeModal}
             >
               取消
             </Button>
 
             <Button
-              disabled={blocked}
+              disabled={mutationBlocked}
               onClick={() => void save(false)}
             >
-              {submitting ? "儲存中…" : "只加入 Next@NTU"}
+              {operation === "save"
+                ? "儲存中…"
+                : editingId !== null
+                  ? "儲存修改"
+                  : "只加入 Next@NTU"}
             </Button>
 
             <Button
               variant="primary"
-              disabled={blocked}
+              disabled={mutationBlocked || !canImport}
               onClick={() => void save(true)}
             >
-              加入並帶到 Google
+              {operation === "export"
+                ? "匯入 Google 中…"
+                : "儲存並匯入 Google"}
             </Button>
           </>
         }
@@ -609,8 +1021,34 @@ export function CalendarPage({
           className="space-y-4"
           onSubmit={handleSubmit}
         >
+          {editingTask && (
+            <div className="border border-[var(--line)] bg-[var(--bg)] p-3 text-[10px] leading-6 text-[var(--muted)]">
+              <p>
+                狀態：{editingTask.done ? "已完成" : "未完成"}
+              </p>
+              <p>
+                來源：
+                {editingTask.source === "todo"
+                  ? "生涯待辦"
+                  : "日曆活動"}
+              </p>
+              <p>
+                建立時間：{formatTimestamp(editingTask.createdAt)}
+              </p>
+              <p>
+                更新時間：{formatTimestamp(editingTask.updatedAt)}
+              </p>
+            </div>
+          )}
+
+          {missingTask && (
+            <p role="alert" className="text-xs text-red-400">
+              這筆任務已不在目前資料中，請關閉視窗並重新讀取。
+            </p>
+          )}
+
           <fieldset
-            disabled={submitting || taskStore.busy}
+            disabled={mutationBlocked}
             className="space-y-4"
           >
             <Field label="任務名稱">
@@ -618,10 +1056,7 @@ export function CalendarPage({
                 className={inputClass}
                 value={form.title}
                 onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
+                  updateField("title", event.target.value)
                 }
                 placeholder="例如：Coffee chat with Amy"
                 required
@@ -636,10 +1071,7 @@ export function CalendarPage({
                   type="date"
                   value={form.date}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      date: event.target.value,
-                    }))
+                    updateField("date", event.target.value)
                   }
                   required
                 />
@@ -652,58 +1084,77 @@ export function CalendarPage({
                   step={60}
                   value={form.time}
                   onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      time: event.target.value,
-                    }))
+                    updateField("time", event.target.value)
                   }
                   required
                 />
               </Field>
             </div>
 
-            <Field label="邀請協作者（Gmail，可用逗號分隔）">
+            <Field label="協作者（Gmail，選填，可用逗號分隔）">
               <input
                 className={inputClass}
                 value={form.guests}
                 onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    guests: event.target.value,
-                  }))
+                  updateField("guests", event.target.value)
                 }
                 placeholder="teammate@gmail.com"
               />
             </Field>
 
-            <Field label="說明">
-              <input
-                className={inputClass}
+            <Field label="說明（選填）">
+              <textarea
+                className={`${inputClass} min-h-24 resize-y`}
                 value={form.notes}
                 onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    notes: event.target.value,
-                  }))
+                  updateField("notes", event.target.value)
                 }
                 placeholder="議程、準備資料或會議連結"
               />
             </Field>
+
+            <div className="border border-[var(--line)] p-3 text-xs leading-6">
+              <p className="break-all">
+                {googleLoading
+                  ? "正在確認 Google 帳號…"
+                  : canImport
+                    ? `Google 匯入帳號：${googleStatus.email}`
+                    : "尚未連接 Google 日曆，請先儲存任務，再於日曆頁面連接帳號。"}
+              </p>
+
+              {canImport && (
+                <label className="mt-2 flex items-start gap-2 text-[var(--soft)]">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={inviteGuests}
+                    onChange={(event) =>
+                      setInviteGuests(event.target.checked)
+                    }
+                  />
+                  <span>
+                    匯入時邀請上方協作者，並由 Google 寄送邀請。
+                    未勾選則只建立自己的活動。
+                  </span>
+                </label>
+              )}
+            </div>
           </fieldset>
 
           <p className="text-[10px] leading-5 text-[var(--muted)]">
-            儲存後會同步加入生涯待辦，並依此日期與時間排序。
+            新增、修改與刪除會同步到生涯待辦；時間以台灣時間為準。
+            Google 活動需在 Google 日曆自行修改或刪除。
+            同一任務重複匯入相同 Google 帳號，不會重複新增或更新既有 Google 活動。
           </p>
 
-          {taskStore.error && (
-            <p
+          {(localError || taskStore.error) && (
+            <div
               role="alert"
-              className="break-words text-xs leading-5 text-[var(--soft)]"
+              className="space-y-1 break-words text-xs leading-5 text-red-400"
             >
-              儲存未完成：{taskStore.error}
-              <br />
-              請檢查後再次按儲存按鈕。
-            </p>
+              {localError && <p>{localError}</p>}
+              {taskStore.error && <p>{taskStore.error}</p>}
+            </div>
           )}
         </form>
       </Modal>

@@ -7,6 +7,12 @@ import {
   type TaskSource,
 } from "./types";
 
+// 編輯時不更改任務來源。
+export type UpdateTaskInput = Omit<
+  CreateTaskInput,
+  "source"
+>;
+
 interface StoredTask {
   id: string;
   user_id: string;
@@ -55,7 +61,7 @@ function toCareerTask(row: StoredTask): CareerTask {
   };
 }
 
-function validateInput(input: CreateTaskInput) {
+function validateInput(input: UpdateTaskInput) {
   if (!input.title.trim()) {
     throw new Error("請輸入任務內容");
   }
@@ -78,13 +84,18 @@ function validateInput(input: CreateTaskInput) {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time)) {
     throw new Error("請選擇有效的時間");
   }
+}
 
-  if (
-    input.source !== "todo" &&
-    input.source !== "calendar"
-  ) {
-    throw new Error("任務來源不正確");
-  }
+function normalizeGuests(
+  guests: string[] = []
+): string[] {
+  return [
+    ...new Set(
+      guests
+        .map((email) => email.trim())
+        .filter(Boolean)
+    ),
+  ];
 }
 
 export function createTaskRepository(
@@ -93,9 +104,10 @@ export function createTaskRepository(
   return {
     /**
      * 讀取目前帳號的全部任務。
-     * 使用分頁，避免單次查詢筆數上限。
      */
-    async load(userId: string): Promise<CareerTask[]> {
+    async load(
+      userId: string
+    ): Promise<CareerTask[]> {
       const tasks: CareerTask[] = [];
       const pageSize = 100;
 
@@ -112,7 +124,8 @@ export function createTaskRepository(
 
         if (error) throw error;
 
-        const rows = (data ?? []) as unknown as StoredTask[];
+        const rows =
+          (data ?? []) as unknown as StoredTask[];
 
         tasks.push(...rows.map(toCareerTask));
 
@@ -125,10 +138,8 @@ export function createTaskRepository(
     },
 
     /**
-     * 新增一筆任務。
-     *
-     * 呼叫端可以提供固定 ID，讓同一次新增在重試時
-     * 使用相同 ID，避免建立重複資料。
+     * 新增任務。
+     * 相同操作重試時可沿用 ID，避免重複新增。
      */
     async create(
       userId: string,
@@ -137,13 +148,12 @@ export function createTaskRepository(
     ): Promise<CareerTask> {
       validateInput(input);
 
-      const guests = [
-        ...new Set(
-          (input.guests ?? [])
-            .map((email) => email.trim())
-            .filter(Boolean)
-        ),
-      ];
+      if (
+        input.source !== "todo" &&
+        input.source !== "calendar"
+      ) {
+        throw new Error("任務來源不正確");
+      }
 
       const { data, error } = await client
         .from(TABLE)
@@ -154,7 +164,7 @@ export function createTaskRepository(
           date: input.date,
           time: input.time,
           done: false,
-          guests,
+          guests: normalizeGuests(input.guests),
           notes: input.notes?.trim() ?? "",
           source: input.source,
         })
@@ -168,7 +178,6 @@ export function createTaskRepository(
       }
 
       // 上次可能已成功寫入，但回應因網路中斷而遺失。
-      // 相同 ID 再次新增時，讀回原本那筆任務。
       if (error.code === "23505") {
         const {
           data: existing,
@@ -191,8 +200,41 @@ export function createTaskRepository(
     },
 
     /**
+     * 修改既有任務。
+     *
+     * 保留原本的 ID、擁有者、來源、完成狀態及建立時間。
+     * 修改時間由資料庫自動更新。
+     */
+    async update(
+      userId: string,
+      taskId: string,
+      input: UpdateTaskInput
+    ): Promise<CareerTask> {
+      validateInput(input);
+
+      const { data, error } = await client
+        .from(TABLE)
+        .update({
+          title: input.title.trim(),
+          date: input.date,
+          time: input.time,
+          guests: normalizeGuests(input.guests),
+          notes: input.notes?.trim() ?? "",
+        })
+        .eq("id", taskId)
+        .eq("user_id", userId)
+        .select(COLUMNS)
+        .single();
+
+      if (error) throw error;
+
+      return toCareerTask(
+        data as unknown as StoredTask
+      );
+    },
+
+    /**
      * 設定完成狀態。
-     * 使用明確的 true / false，重試時不會反覆切換。
      */
     async setDone(
       userId: string,

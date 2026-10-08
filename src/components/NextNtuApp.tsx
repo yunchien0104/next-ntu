@@ -26,6 +26,27 @@ import type {
   Theme,
 } from "@/lib/types";
 
+// Google 授權返回網站時，開啟日曆分頁。
+// 網址中的結果由 CalendarPage 顯示並清除。
+function getEntryPage(): ProductPage {
+  if (typeof window === "undefined") {
+    return "coach";
+  }
+
+  const url = new URL(window.location.href);
+  const result = url.searchParams.get("googleCalendar");
+
+  if (
+    result === "connected" ||
+    result === "cancelled" ||
+    result === "error"
+  ) {
+    return "calendar";
+  }
+
+  return "coach";
+}
+
 export function NextNtuApp() {
   const [mounted, setMounted] = useState(false);
 
@@ -70,6 +91,9 @@ export function NextNtuApp() {
   useEffect(() => {
     let alive = true;
     let authRevision = 0;
+
+    // 在顯示登入後的畫面前，決定進入哪個分頁。
+    setActivePage(getEntryPage());
 
     const {
       data: { subscription },
@@ -132,16 +156,20 @@ export function NextNtuApp() {
 
     void checkSession();
 
-    const savedTheme =
-      window.localStorage.getItem(
-        "next-ntu-theme"
-      );
+    try {
+      const savedTheme =
+        window.localStorage.getItem(
+          "next-ntu-theme"
+        );
 
-    if (
-      savedTheme === "light" ||
-      savedTheme === "dark"
-    ) {
-      setTheme(savedTheme);
+      if (
+        savedTheme === "light" ||
+        savedTheme === "dark"
+      ) {
+        setTheme(savedTheme);
+      }
+    } catch {
+      // 瀏覽器無法讀取本機設定時，使用預設主題。
     }
 
     return () => {
@@ -151,8 +179,11 @@ export function NextNtuApp() {
   }, []);
 
   function handleLoginSuccess() {
-    setActivePage("coach");
+    // 若 Google 授權返回後需要重新登入，
+    // 登入成功仍會進入日曆分頁。
+    setActivePage(getEntryPage());
     setProfileOpen(false);
+    setSettingsOpen(false);
   }
 
   async function handleLogout() {
@@ -195,6 +226,20 @@ export function NextNtuApp() {
       setSettingsOpen(false);
       setCalendarDraft("");
       setActivePage("coach");
+
+      // 清除尚未顯示的 Google 回呼提示。
+      const url = new URL(window.location.href);
+
+      url.searchParams.delete("googleCalendar");
+      url.searchParams.delete(
+        "googleCalendarMessage"
+      );
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${url.pathname}${url.search}${url.hash}`
+      );
     } catch (error) {
       console.error(
         "Sign out failed:",
@@ -208,10 +253,14 @@ export function NextNtuApp() {
   function changeTheme(next: Theme) {
     setTheme(next);
 
-    window.localStorage.setItem(
-      "next-ntu-theme",
-      next
-    );
+    try {
+      window.localStorage.setItem(
+        "next-ntu-theme",
+        next
+      );
+    } catch {
+      notify("主題已切換，但無法保存本機設定");
+    }
   }
 
   function changePage(page: ProductPage) {
@@ -227,7 +276,7 @@ export function NextNtuApp() {
     changePage("calendar");
   }
 
-  // 每次只回傳一個頁面。
+  // 每次只回傳一個頁面，避免分頁累積。
   function renderActivePage() {
     switch (activePage) {
       case "coach":
@@ -306,7 +355,6 @@ export function NextNtuApp() {
         }
       />
 
-      {/* 切換分頁或帳號時，替換整個頁面容器。 */}
       <div
         key={`page-${userId}-${activePage}`}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"

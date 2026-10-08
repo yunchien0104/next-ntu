@@ -8,7 +8,11 @@ import {
 } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { createTaskRepository } from "./repository";
+
+import {
+  createTaskRepository,
+  type UpdateTaskInput,
+} from "./repository";
 
 import {
   sortCareerTasks,
@@ -91,81 +95,85 @@ export function useCloudTasks(
 
   /**
    * 載入雲端任務。
-   * 舊帳號或過期請求的結果不會寫入目前畫面。
+   * 避免舊帳號或過期請求的結果覆蓋目前資料。
    */
-  const reload = useCallback(async (): Promise<boolean> => {
-    const owner = ownerRef.current;
-
-    if (
-      !owner ||
-      owner.userId !== userId ||
-      !isCurrentOwner(owner) ||
-      mutationLockRef.current
-    ) {
-      return false;
-    }
-
-    const revision = ++readRevisionRef.current;
-
-    loadingRef.current = true;
-
-    setState((current) => ({
-      ...current,
-      loading: true,
-      error: null,
-    }));
-
-    try {
-      const tasks = await repository.load(owner.userId);
+  const reload = useCallback(
+    async (): Promise<boolean> => {
+      const owner = ownerRef.current;
 
       if (
+        !owner ||
+        owner.userId !== userId ||
         !isCurrentOwner(owner) ||
-        revision !== readRevisionRef.current
+        mutationLockRef.current
       ) {
         return false;
       }
 
-      readyRef.current = true;
+      const revision = ++readRevisionRef.current;
+
+      loadingRef.current = true;
 
       setState((current) => ({
         ...current,
-        tasks,
-        ready: true,
+        loading: true,
         error: null,
       }));
 
-      return true;
-    } catch (error) {
-      if (
-        isCurrentOwner(owner) &&
-        revision === readRevisionRef.current
-      ) {
-        console.error("Load tasks failed:", error);
+      try {
+        const tasks =
+          await repository.load(owner.userId);
+
+        if (
+          !isCurrentOwner(owner) ||
+          revision !== readRevisionRef.current
+        ) {
+          return false;
+        }
+
+        readyRef.current = true;
 
         setState((current) => ({
           ...current,
-          error: getErrorMessage(error),
+          tasks,
+          ready: true,
+          error: null,
         }));
-      }
 
-      return false;
-    } finally {
-      if (
-        isCurrentOwner(owner) &&
-        revision === readRevisionRef.current
-      ) {
-        loadingRef.current = false;
+        return true;
+      } catch (error) {
+        if (
+          isCurrentOwner(owner) &&
+          revision === readRevisionRef.current
+        ) {
+          console.error("Load tasks failed:", error);
 
-        setState((current) => ({
-          ...current,
-          loading: false,
-        }));
+          setState((current) => ({
+            ...current,
+            error: getErrorMessage(error),
+          }));
+        }
+
+        return false;
+      } finally {
+        if (
+          isCurrentOwner(owner) &&
+          revision === readRevisionRef.current
+        ) {
+          loadingRef.current = false;
+
+          setState((current) => ({
+            ...current,
+            loading: false,
+          }));
+        }
       }
-    }
-  }, [userId, isCurrentOwner]);
+    },
+    [userId, isCurrentOwner]
+  );
 
   /**
-   * 登入、登出或切換帳號時，重新讀取該帳號的任務。
+   * 登入、登出或切換帳號時重設任務狀態。
    */
   useEffect(() => {
     readRevisionRef.current++;
@@ -200,9 +208,8 @@ export function useCloudTasks(
   }, [userId, reload]);
 
   /**
-   * 統一處理新增、完成與刪除。
-   * 同一時間只允許一個修改，避免重複操作。
-   * 雲端成功後才更新畫面。
+   * 統一處理新增、修改、完成與刪除。
+   * 雲端成功後才更新畫面，同時避免重複操作。
    */
   const runMutation = useCallback(
     async <T>(
@@ -236,7 +243,8 @@ export function useCloudTasks(
       }));
 
       try {
-        const result = await operation(owner.userId);
+        const result =
+          await operation(owner.userId);
 
         if (!isCurrentOwner(owner)) {
           return null;
@@ -281,7 +289,7 @@ export function useCloudTasks(
 
   /**
    * 新增任務。
-   * 相同內容重試時沿用 ID，避免網路中斷造成重複新增。
+   * 相同內容重試時沿用 ID，避免重複新增。
    */
   const createTask = useCallback(
     async (
@@ -355,6 +363,33 @@ export function useCloudTasks(
   );
 
   /**
+   * 修改任務細節。
+   * 更新共用資料後，待辦與日曆會同步顯示新內容。
+   */
+  const updateTask = useCallback(
+    async (
+      taskId: string,
+      input: UpdateTaskInput
+    ): Promise<CareerTask | null> => {
+      return runMutation(
+        (ownerId) =>
+          repository.update(
+            ownerId,
+            taskId,
+            input
+          ),
+        (tasks, updated) => [
+          ...tasks.filter(
+            (item) => item.id !== updated.id
+          ),
+          updated,
+        ]
+      );
+    },
+    [runMutation]
+  );
+
+  /**
    * 勾選或取消完成。
    */
   const setTaskDone = useCallback(
@@ -364,7 +399,11 @@ export function useCloudTasks(
     ): Promise<boolean> => {
       const task = await runMutation(
         (ownerId) =>
-          repository.setDone(ownerId, taskId, done),
+          repository.setDone(
+            ownerId,
+            taskId,
+            done
+          ),
         (tasks, updated) =>
           tasks.map((item) =>
             item.id === updated.id
@@ -379,14 +418,19 @@ export function useCloudTasks(
   );
 
   /**
-   * 刪除任務。
-   * 待辦與日曆都會從共用狀態移除同一筆資料。
+   * 刪除共用任務，日曆與待辦都會移除。
    */
   const deleteTask = useCallback(
-    async (taskId: string): Promise<boolean> => {
+    async (
+      taskId: string
+    ): Promise<boolean> => {
       const result = await runMutation(
         async (ownerId) => {
-          await repository.remove(ownerId, taskId);
+          await repository.remove(
+            ownerId,
+            taskId
+          );
+
           return taskId;
         },
         (tasks, deletedId) =>
@@ -414,6 +458,7 @@ export function useCloudTasks(
     error: visibleState.error,
     reload,
     createTask,
+    updateTask,
     setTaskDone,
     deleteTask,
   };
