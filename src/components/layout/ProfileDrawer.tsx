@@ -9,15 +9,8 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { ApplicationFiles } from "@/components/profile/ApplicationFiles";
 import { supabase } from "@/lib/supabase";
-
-interface FileRow {
-  id: string;
-  kind: string;
-  name: string;
-  meta: string;
-  ready: boolean;
-}
 
 interface Profile {
   id: string;
@@ -55,41 +48,8 @@ const emptyForm: ProfileForm = {
   program: "",
 };
 
-const initialFiles: FileRow[] = [
-  {
-    id: "resume",
-    kind: "PDF",
-    name: "履歷_v3.pdf",
-    meta: "昨天更新 · 1.2 MB",
-    ready: true,
-  },
-  {
-    id: "transcript",
-    kind: "PDF",
-    name: "歷年成績單.pdf",
-    meta: "官方版本 · 840 KB",
-    ready: true,
-  },
-  {
-    id: "plan",
-    kind: "DOC",
-    name: "讀書計畫_草稿",
-    meta: "完整度 45%",
-    ready: false,
-  },
-  {
-    id: "github",
-    kind: "URL",
-    name: "GitHub Portfolio",
-    meta: "3 個公開專案",
-    ready: true,
-  },
-];
-
-// 切換帳號時，重新建立畫面，避免沿用上一個人的資料。
-export function ProfileDrawer(
-  props: ProfileDrawerProps
-) {
+// 切換帳號時重新建立畫面。
+export function ProfileDrawer(props: ProfileDrawerProps) {
   if (!props.userId) return null;
 
   return (
@@ -110,33 +70,23 @@ function ProfileDrawerContent({
 }: Omit<ProfileDrawerProps, "userId"> & {
   userId: string;
 }) {
-  const [files, setFiles] = useState(initialFiles);
-  const [profile, setProfile] =
-    useState<Profile | null>(null);
-  const [form, setForm] =
-    useState<ProfileForm>(emptyForm);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [form, setForm] = useState<ProfileForm>(emptyForm);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [reloadVersion, setReloadVersion] =
-    useState(0);
+  const [reloadVersion, setReloadVersion] = useState(0);
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const [avatarBlob, setAvatarBlob] =
-    useState<Blob | null>(null);
-  const [avatarFile, setAvatarFile] =
-    useState<File | null>(null);
+  const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarUrl, setAvatarUrl] = useState("");
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const avatarInputRef =
-    useRef<HTMLInputElement>(null);
-  const dialogRef =
-    useRef<HTMLDialogElement>(null);
-
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const mountedRef = useRef(false);
   const savingRef = useRef(false);
 
@@ -166,8 +116,7 @@ function ProfileDrawerContent({
         if (error) throw error;
         if (!alive) return;
 
-        const nextProfile =
-          data as Profile | null;
+        const nextProfile = data as Profile | null;
 
         setProfile(nextProfile);
         setAvatarBlob(null);
@@ -180,11 +129,7 @@ function ProfileDrawerContent({
           if (!alive) return;
 
           if (result.error) {
-            console.error(
-              "Load avatar failed:",
-              result.error
-            );
-
+            console.error("Load avatar failed:", result.error);
             notify("基本資料已載入，但照片讀取失敗");
           } else {
             setAvatarBlob(result.data);
@@ -193,14 +138,8 @@ function ProfileDrawerContent({
       } catch (error) {
         if (!alive) return;
 
-        console.error(
-          "Load profile failed:",
-          error
-        );
-
-        setLoadError(
-          "無法讀取個人資料，請重新載入。"
-        );
+        console.error("Load profile failed:", error);
+        setLoadError("無法讀取個人資料，請重新載入。");
       } finally {
         if (alive) setLoading(false);
       }
@@ -213,7 +152,7 @@ function ProfileDrawerContent({
     };
   }, [userId, reloadVersion, notify]);
 
-  // 為照片建立預覽網址，使用完後釋放。
+  // 建立照片預覽網址，使用完後釋放。
   useEffect(() => {
     const source = avatarFile ?? avatarBlob;
 
@@ -230,7 +169,6 @@ function ProfileDrawerContent({
     };
   }, [avatarFile, avatarBlob]);
 
-  // 使用原生 dialog 處理視窗焦點與背景鎖定。
   useEffect(() => {
     const dialog = dialogRef.current;
 
@@ -244,17 +182,12 @@ function ProfileDrawerContent({
   }, [editing]);
 
   function openEditor() {
-    if (loading || loadError || savingRef.current) {
-      return;
-    }
+    if (loading || loadError || savingRef.current) return;
 
     setForm({
       name: profile?.name ?? "",
       major: profile?.major ?? "",
-      year:
-        profile?.year != null
-          ? String(profile.year)
-          : "",
+      year: profile?.year != null ? String(profile.year) : "",
       program: profile?.program ?? "",
     });
 
@@ -271,19 +204,14 @@ function ProfileDrawerContent({
     setFormError("");
   }
 
-  function updateForm(
-    field: keyof ProfileForm,
-    value: string
-  ) {
+  function updateForm(field: keyof ProfileForm, value: string) {
     setForm((current) => ({
       ...current,
       [field]: value,
     }));
   }
 
-  function selectAvatar(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
+  function selectAvatar(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
 
@@ -300,11 +228,8 @@ function ProfileDrawerContent({
       return;
     }
 
-    if (
-      file.size === 0 ||
-      file.size > 2 * 1024 * 1024
-    ) {
-      setFormError("照片大小須介於 0 到 2 MB 之間");
+    if (file.size === 0 || file.size > 2 * 1024 * 1024) {
+      setFormError("照片不可為空，且最大為 2 MB");
       return;
     }
 
@@ -312,18 +237,10 @@ function ProfileDrawerContent({
     setAvatarFile(file);
   }
 
-  async function saveProfile(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (
-      savingRef.current ||
-      loading ||
-      loadError
-    ) {
-      return;
-    }
+    if (savingRef.current || loading || loadError) return;
 
     const name = form.name.trim();
     const major = form.major.trim();
@@ -335,11 +252,7 @@ function ProfileDrawerContent({
       return;
     }
 
-    if (
-      !Number.isInteger(year) ||
-      year < 1 ||
-      year > 10
-    ) {
+    if (!Number.isInteger(year) || year < 1 || year > 10) {
       setFormError("年級請填寫 1 到 10 的整數");
       return;
     }
@@ -360,9 +273,7 @@ function ProfileDrawerContent({
 
       if (!mountedRef.current) return;
 
-      let avatarPath =
-        profile?.avatar_path ?? null;
-
+      let avatarPath = profile?.avatar_path ?? null;
       const selectedPhoto = avatarFile;
 
       if (selectedPhoto) {
@@ -372,19 +283,17 @@ function ProfileDrawerContent({
           "image/webp": "webp",
         };
 
-        const extension =
-          extensions[selectedPhoto.type];
+        const extension = extensions[selectedPhoto.type];
 
         avatarPath =
           `${userId}/${crypto.randomUUID()}.${extension}`;
 
-        const { error: uploadError } =
-          await supabase.storage
-            .from(AVATAR_BUCKET)
-            .upload(avatarPath, selectedPhoto, {
-              contentType: selectedPhoto.type,
-              upsert: false,
-            });
+        const { error: uploadError } = await supabase.storage
+          .from(AVATAR_BUCKET)
+          .upload(avatarPath, selectedPhoto, {
+            contentType: selectedPhoto.type,
+            upsert: false,
+          });
 
         if (uploadError) throw uploadError;
         if (!mountedRef.current) return;
@@ -399,8 +308,6 @@ function ProfileDrawerContent({
         updated_at: new Date().toISOString(),
       };
 
-      // 先更新；沒有資料時才新增。
-      // 避免 upsert 更新到沒有授權修改的 id 欄位。
       const updateResult = await supabase
         .from("profiles")
         .update(values)
@@ -408,14 +315,10 @@ function ProfileDrawerContent({
         .select(PROFILE_COLUMNS)
         .maybeSingle();
 
-      if (updateResult.error) {
-        throw updateResult.error;
-      }
-
+      if (updateResult.error) throw updateResult.error;
       if (!mountedRef.current) return;
 
-      let savedProfile =
-        updateResult.data as Profile | null;
+      let savedProfile = updateResult.data as Profile | null;
 
       if (!savedProfile) {
         const insertResult = await supabase
@@ -430,7 +333,6 @@ function ProfileDrawerContent({
         if (!mountedRef.current) return;
 
         if (insertResult.error?.code === "23505") {
-          // 另一個分頁可能剛好建立了同一份 Profile。
           const retryResult = await supabase
             .from("profiles")
             .update(values)
@@ -438,19 +340,11 @@ function ProfileDrawerContent({
             .select(PROFILE_COLUMNS)
             .single();
 
-          if (retryResult.error) {
-            throw retryResult.error;
-          }
-
-          savedProfile =
-            retryResult.data as Profile;
+          if (retryResult.error) throw retryResult.error;
+          savedProfile = retryResult.data as Profile;
         } else {
-          if (insertResult.error) {
-            throw insertResult.error;
-          }
-
-          savedProfile =
-            insertResult.data as Profile;
+          if (insertResult.error) throw insertResult.error;
+          savedProfile = insertResult.data as Profile;
         }
       }
 
@@ -464,16 +358,11 @@ function ProfileDrawerContent({
 
       setAvatarFile(null);
       setEditing(false);
-
       notify("Profile 已儲存");
     } catch (error) {
       if (!mountedRef.current) return;
 
-      console.error(
-        "Save profile failed:",
-        error
-      );
-
+      console.error("Save profile failed:", error);
       setFormError(
         "儲存失敗，請確認網路與登入狀態後重試。"
       );
@@ -485,46 +374,12 @@ function ProfileDrawerContent({
     }
   }
 
-  // 保留原本申請素材的介面功能。
-  function upload(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
-
-    if (!file) return;
-
-    const kind = (
-      file.name.split(".").pop() || "FILE"
-    )
-      .toUpperCase()
-      .slice(0, 3);
-
-    setFiles((rows) => [
-      {
-        id: `${file.name}-${Date.now()}`,
-        kind,
-        name: file.name,
-        meta:
-          `剛剛加入 · ${
-            (file.size / 1024 / 1024).toFixed(1)
-          } MB`,
-        ready: true,
-      },
-      ...rows,
-    ]);
-
-    notify("素材已加入檔案櫃");
-    event.target.value = "";
-  }
-
   const inputClass =
     "mt-2 w-full border border-[var(--line-strong)] bg-[var(--bg)] px-3 py-2.5 text-sm text-[var(--text)] outline-none focus:border-[var(--paper)] disabled:opacity-50";
 
   const profileSummary = [
     profile?.major,
-    profile?.year != null
-      ? `${profile.year} 年級`
-      : null,
+    profile?.year != null ? `${profile.year} 年級` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -548,9 +403,7 @@ function ProfileDrawerContent({
 
       <aside
         className={`fixed right-0 top-14 bottom-0 z-50 w-[min(390px,94vw)] overflow-y-auto border-l border-[var(--line)] bg-[var(--panel)] shadow-2xl transition-transform duration-300 ${
-          open
-            ? "translate-x-0"
-            : "translate-x-full"
+          open ? "translate-x-0" : "translate-x-full"
         }`}
         aria-label="個人檔案側欄"
         aria-hidden={!open}
@@ -561,16 +414,12 @@ function ProfileDrawerContent({
             <div className="font-mono text-[9px] tracking-[.16em] text-[var(--muted)]">
               PERSONAL VAULT
             </div>
-
             <h2 className="text-sm font-semibold">
               個人檔案櫃
             </h2>
           </div>
 
-          <Button
-            variant="quiet"
-            onClick={onClose}
-          >
+          <Button variant="quiet" onClick={onClose}>
             ✕
           </Button>
         </header>
@@ -593,9 +442,7 @@ function ProfileDrawerContent({
                 <Button
                   className="mt-3"
                   onClick={() =>
-                    setReloadVersion(
-                      (value) => value + 1
-                    )
+                    setReloadVersion((value) => value + 1)
                   }
                 >
                   重新載入
@@ -620,10 +467,8 @@ function ProfileDrawerContent({
                     <h3 className="truncate font-semibold">
                       {profile?.name || "尚未填寫個人資料"}
                     </h3>
-
                     <p className="mt-1 text-xs text-[var(--muted)]">
-                      {profileSummary ||
-                        "新增你的基本資料"}
+                      {profileSummary || "新增你的基本資料"}
                     </p>
                   </div>
                 </div>
@@ -647,73 +492,22 @@ function ProfileDrawerContent({
             )}
           </section>
 
-          <div className="mb-2 mt-6 flex justify-between text-xs">
-            <strong>申請素材</strong>
-
-            <span className="text-[var(--muted)]">
-              {files.length} 份
-            </span>
+          {/* 雲端申請素材：上傳、下載、× 刪除 */}
+          <div className="mt-6">
+            <ApplicationFiles
+              key={userId}
+              userId={userId}
+            />
           </div>
-
-          <div className="space-y-2">
-            {files.map((file) => (
-              <div
-                key={file.id}
-                className="grid grid-cols-[38px_1fr_auto] items-center gap-3 border border-[var(--line)] bg-[var(--bg)] p-3"
-              >
-                <span className="grid h-9 place-items-center border border-[var(--line)] font-mono text-[9px]">
-                  {file.kind}
-                </span>
-
-                <div className="min-w-0">
-                  <b className="block truncate text-xs">
-                    {file.name}
-                  </b>
-
-                  <span className="text-[10px] text-[var(--muted)]">
-                    {file.meta}
-                  </span>
-                </div>
-
-                <i
-                  className={`h-2 w-2 rounded-full ${
-                    file.ready
-                      ? "bg-[#ddd]"
-                      : "bg-[#555]"
-                  }`}
-                />
-              </div>
-            ))}
-          </div>
-
-          <input
-            ref={inputRef}
-            className="hidden"
-            type="file"
-            onChange={upload}
-          />
-
-          <Button
-            full
-            className="mt-3"
-            onClick={() =>
-              inputRef.current?.click()
-            }
-          >
-            ＋ 加入申請素材
-          </Button>
 
           <p className="mt-6 border border-[var(--line)] bg-[var(--bg)] p-3 text-[10px] leading-5 text-[var(--muted)]">
-            這是互動產品原型。正式版會在每則建議旁標示來源、資料時間與可信度；Facebook
-            與校內資料也需要依權限與平台規範串接。
+            這是互動產品原型。正式版會在每則建議旁標示來源、
+            資料時間與可信度；Facebook 與校內資料也需要依權限
+            與平台規範串接。
           </p>
 
           <div className="mt-6 border-t border-[var(--line)] pt-4">
-            <Button
-              full
-              variant="quiet"
-              onClick={onLogout}
-            >
+            <Button full variant="quiet" onClick={onLogout}>
               登出
             </Button>
           </div>
