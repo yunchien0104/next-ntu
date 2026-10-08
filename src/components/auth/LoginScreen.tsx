@@ -1,7 +1,12 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import {
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Image from "next/image";
+
 import { supabase } from "@/lib/supabase";
 
 type AuthMode = "login" | "signup" | "forgot";
@@ -10,61 +15,54 @@ type LoginScreenProps = {
   onLoginSuccess: () => void;
 };
 
+const SITE_URL = "https://next-ntu.vercel.app";
+
 export function LoginScreen({
   onLoginSuccess,
 }: LoginScreenProps) {
-  const [mode, setMode] = useState<AuthMode>("login");
+  const [mode, setMode] =
+    useState<AuthMode>("login");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] =
+    useState("");
 
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const submittingRef = useRef(false);
+
   function switchMode(nextMode: AuthMode) {
+    if (submittingRef.current) return;
+
     setMode(nextMode);
     setMessage("");
     setPassword("");
     setConfirmPassword("");
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (submittingRef.current) return;
+
     setMessage("");
 
-    // Forgot password
-    if (mode === "forgot") {
-      if (!email) {
-        setMessage("請輸入 Email");
-        return;
-      }
+    const normalizedEmail = email.trim();
 
-      setLoading(true);
-
-      const { error } =
-        await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
-
-      setLoading(false);
-
-      if (error) {
-        setMessage(error.message);
-        return;
-      }
-
-      setMessage("重設密碼連結已寄到你的信箱。");
+    if (!normalizedEmail) {
+      setMessage("請輸入 Email");
       return;
     }
 
-    // Login + Signup need email/password
-    if (!email || !password) {
-      setMessage("請輸入 Email 與密碼");
+    if (mode !== "forgot" && !password) {
+      setMessage("請輸入密碼");
       return;
     }
 
-    // Signup
     if (mode === "signup") {
       if (password.length < 8) {
         setMessage("密碼至少需要 8 個字元");
@@ -75,51 +73,89 @@ export function LoginScreen({
         setMessage("兩次輸入的密碼不一致");
         return;
       }
+    }
 
-      setLoading(true);
+    submittingRef.current = true;
+    setLoading(true);
 
-      const { data, error } = await supabase.auth.signUp({
-          email,
+    try {
+      // 忘記密碼：返回正式網站的重設密碼頁。
+      if (mode === "forgot") {
+        const { error } =
+          await supabase.auth.resetPasswordForEmail(
+            normalizedEmail,
+            {
+              redirectTo:
+                `${SITE_URL}/reset-password`,
+            }
+          );
+
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+
+        setMessage(
+          "重設密碼連結已寄出，請查看信箱。"
+        );
+        return;
+      }
+
+      // 註冊：驗證後返回正式網站的驗證完成頁。
+      if (mode === "signup") {
+        const { data, error } =
+          await supabase.auth.signUp({
+            email: normalizedEmail,
+            password,
+            options: {
+              emailRedirectTo:
+                `${SITE_URL}/auth/verified`,
+            },
+          });
+
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+
+        if (data.session) {
+          onLoginSuccess();
+          return;
+        }
+
+        setPassword("");
+        setConfirmPassword("");
+        setMode("login");
+
+        setMessage(
+          "註冊申請已送出，請至信箱查看驗證信。若已註冊，請直接登入。"
+        );
+        return;
+      }
+
+      // 登入。
+      const { error } =
+        await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
           password,
-          options: {
-      emailRedirectTo:`${window.location.origin}/auth/verified`,
-          },
         });
-
-      setLoading(false);
 
       if (error) {
         setMessage(error.message);
         return;
       }
 
-      if (data.session) {
-        onLoginSuccess();
-        return;
-      }
+      onLoginSuccess();
+    } catch (error) {
+      console.error("Auth request failed:", error);
 
-      setMessage("帳號建立成功，請至信箱完成驗證。");
-      setMode("login");
-      return;
+      setMessage(
+        "暫時無法連線，請確認網路後再試一次。"
+      );
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
-
-    // Login
-    setLoading(true);
-
-    const { error } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-    setLoading(false);
-
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
-
-    onLoginSuccess();
   }
 
   return (
@@ -153,9 +189,11 @@ export function LoginScreen({
             autoComplete="email"
             placeholder="you@example.com"
             value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
+            onChange={(event) =>
+              setEmail(event.target.value)
             }
+            disabled={loading}
+            required
           />
         </div>
 
@@ -175,9 +213,11 @@ export function LoginScreen({
               }
               placeholder="••••••••"
               value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
+              onChange={(event) =>
+                setPassword(event.target.value)
               }
+              disabled={loading}
+              required
             />
           </div>
         )}
@@ -194,9 +234,13 @@ export function LoginScreen({
               autoComplete="new-password"
               placeholder="••••••••"
               value={confirmPassword}
-              onChange={(e) =>
-                setConfirmPassword(e.target.value)
+              onChange={(event) =>
+                setConfirmPassword(
+                  event.target.value
+                )
               }
+              disabled={loading}
+              required
             />
           </div>
         )}
@@ -209,10 +253,10 @@ export function LoginScreen({
           {loading
             ? "處理中..."
             : mode === "login"
-            ? "登入"
-            : mode === "signup"
-            ? "建立帳號"
-            : "寄送重設密碼連結"}
+              ? "登入"
+              : mode === "signup"
+                ? "建立帳號"
+                : "寄送重設密碼連結"}
         </button>
 
         {mode === "login" && (
@@ -222,6 +266,7 @@ export function LoginScreen({
               onClick={() =>
                 switchMode("signup")
               }
+              disabled={loading}
             >
               建立帳號
             </button>
@@ -231,6 +276,7 @@ export function LoginScreen({
               onClick={() =>
                 switchMode("forgot")
               }
+              disabled={loading}
             >
               忘記密碼？
             </button>
@@ -244,13 +290,18 @@ export function LoginScreen({
             onClick={() =>
               switchMode("login")
             }
+            disabled={loading}
           >
             返回登入
           </button>
         )}
 
         {message && (
-          <div className="login-note">
+          <div
+            className="login-note"
+            role="status"
+            aria-live="polite"
+          >
             {message}
           </div>
         )}
