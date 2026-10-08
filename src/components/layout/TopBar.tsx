@@ -12,14 +12,6 @@ const navigation: Array<[ProductPage, string]> = [
   ["resume", "修履歷"],
 ];
 
-const pageTitles: Record<ProductPage, string> = {
-  coach: "大三實習 × 研究所雙軌規劃",
-  calendar: "日曆與協作任務",
-  columns: "校園專欄",
-  talent: "人才庫",
-  resume: "AI 履歷工作室",
-};
-
 interface TopBarProps {
   activePage: ProductPage;
   onPageChange: (page: ProductPage) => void;
@@ -34,7 +26,7 @@ export function TopBar({
   onSettings,
 }: TopBarProps) {
   return (
-    <header className="sticky top-0 z-40 grid h-14 w-full min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-[var(--line)] bg-[color:var(--bg)]/95 px-2 backdrop-blur sm:px-3 xl:grid-cols-[250px_auto_minmax(0,1fr)_auto] xl:px-4">
+    <header className="sticky top-0 z-40 grid h-14 w-full min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center border-b border-[var(--line)] bg-[color:var(--bg)]/95 px-2 backdrop-blur sm:px-3 xl:grid-cols-[250px_minmax(0,1fr)_auto] xl:px-4">
       <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-2.5 pr-2 sm:pr-3">
         <img
           className="h-8 w-8 shrink-0 object-contain"
@@ -71,15 +63,6 @@ export function TopBar({
           </button>
         ))}
       </nav>
-
-      <div className="col-start-3 row-start-1 hidden min-w-0 items-center gap-2 overflow-hidden px-5 text-xs text-[var(--muted)] xl:flex">
-        <span className="shrink-0">工作區</span>
-        <span className="shrink-0">/</span>
-
-        <strong className="truncate font-medium text-[var(--text)]">
-          {pageTitles[activePage]}
-        </strong>
-      </div>
 
       <div className="col-start-3 row-start-1 flex shrink-0 items-center justify-self-end gap-1 pl-2 sm:gap-2 xl:col-start-4">
         <span className="hidden whitespace-nowrap border border-[var(--line)] px-2.5 py-2 font-mono text-[10px] text-[var(--soft)] 2xl:block">

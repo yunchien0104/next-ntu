@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  supabase,
-  getValidSession,
-} from "@/lib/supabase";
+import { supabase, getValidSession } from "@/lib/supabase";
 import type { Conversation } from "@/lib/types";
 import {
   createChatRepository,
@@ -14,31 +11,128 @@ import {
 
 const repository = createChatRepository(supabase);
 
-function getErrorMessage(cause: unknown) {
-  if (cause instanceof Error) return cause.message;
+const MAX_MESSAGE_LENGTH = 8_000;
+const REQUEST_TIMEOUT_MS = 70_000;
+const DRAFT_STORAGE_PREFIX = "next-ntu:unsaved-replies:v1:";
+
+function getErrorMessage(cause: unknown): string {
+  if (cause instanceof Error) {
+    return cause.message;
+  }
 
   if (
     cause &&
     typeof cause === "object" &&
-    "message" in cause
+    "message" in cause &&
+    typeof cause.message === "string"
   ) {
-    return String(cause.message);
+    return cause.message;
   }
 
   return "操作失敗，請稍後再試。";
 }
 
-function fallbackTitle(question: string) {
-  return question.length > 14
-    ? `${question.slice(0, 14)}…`
-    : question;
+function asRecord(
+  value: unknown
+): Record<string, unknown> | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return value as Record<string, unknown>;
+  }
+
+  return null;
 }
 
-export function useCloudConversations(
-  userId: string | null
-) {
-  const [conversations, setConversations] =
-    useState<Conversation[]>([]);
+function fallbackTitle(question: string): string {
+  const text = question.replace(/\s+/g, " ").trim();
+  const characters = Array.from(text);
+
+  return characters.length > 14
+    ? `${characters.slice(0, 14).join("")}…`
+    : text || "新問題";
+}
+
+function draftStorageKey(ownerId: string): string {
+  return `${DRAFT_STORAGE_PREFIX}${ownerId}`;
+}
+
+function readDrafts(ownerId: string): StoredMessage[] {
+  try {
+    const raw = window.sessionStorage.getItem(
+      draftStorageKey(ownerId)
+    );
+
+    if (!raw) {
+      return [];
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const rows: StoredMessage[] = [];
+
+    for (const item of parsed) {
+      const row = asRecord(item);
+
+      if (
+        !row ||
+        typeof row.id !== "string" ||
+        !row.id ||
+        typeof row.conversation_id !== "string" ||
+        !row.conversation_id ||
+        row.user_id !== ownerId ||
+        row.role !== "assistant" ||
+        typeof row.content !== "string" ||
+        !row.content.trim() ||
+        typeof row.created_at !== "string" ||
+        !Number.isFinite(Date.parse(row.created_at))
+      ) {
+        continue;
+      }
+
+      rows.push({
+        id: row.id,
+        conversation_id: row.conversation_id,
+        user_id: ownerId,
+        role: "assistant",
+        content: row.content,
+        created_at: row.created_at,
+      });
+    }
+
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function writeDrafts(
+  ownerId: string,
+  rows: StoredMessage[]
+): boolean {
+  try {
+    const key = draftStorageKey(ownerId);
+
+    if (rows.length === 0) {
+      window.sessionStorage.removeItem(key);
+    } else {
+      window.sessionStorage.setItem(key, JSON.stringify(rows));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function useCloudConversations(userId: string | null) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [folders, setFolders] = useState<ChatFolder[]>([]);
   const [activeConversationId, setActiveConversationId] =
     useState<string | null>(null);
@@ -50,22 +144,74 @@ export function useCloudConversations(
   const [reloadVersion, setReloadVersion] = useState(0);
 
   const generation = useRef(0);
+  const loadedOwner = useRef<string | null>(null);
+
+  const conversationItems = useRef<Conversation[]>([]);
+  const folderItems = useRef<ChatFolder[]>([]);
+
   const busy = useRef(new Set<string>());
-  const failedWrites = useRef(
-    new Map<string, StoredMessage>()
-  );
+  const requests = useRef(new Set<AbortController>());
+  const failedWrites = useRef(new Map<string, StoredMessage>());
 
   const creating = useRef(false);
   const retrying = useRef(false);
   const folderBusy = useRef(false);
-  const loadedOwner = useRef<string | null>(null);
+  const updatingTitles = useRef(new Set<string>());
+
+  function updateConversations(
+    update: (items: Conversation[]) => Conversation[]
+  ) {
+    const next = update(conversationItems.current);
+    conversationItems.current = next;
+    setConversations(next);
+  }
+
+  function updateFolders(
+    update: (items: ChatFolder[]) => ChatFolder[]
+  ) {
+    const next = update(folderItems.current);
+    folderItems.current = next;
+    setFolders(next);
+  }
+
+  function checkCurrent(current: number) {
+    if (current !== generation.current) {
+      throw new Error("登入狀態已變更。");
+    }
+  }
+
+  async function ensureSession(
+    ownerId: string,
+    current: number
+  ) {
+    checkCurrent(current);
+    await getValidSession(ownerId);
+    checkCurrent(current);
+  }
+
+  function persistDrafts(ownerId: string): boolean {
+    return writeDrafts(
+      ownerId,
+      Array.from(failedWrites.current.values())
+    );
+  }
 
   useEffect(() => {
     const current = ++generation.current;
 
+    for (const controller of requests.current) {
+      controller.abort();
+    }
+
+    requests.current.clear();
+    busy.current.clear();
+    failedWrites.current.clear();
+    updatingTitles.current.clear();
+
     loadedOwner.current = null;
-    busy.current = new Set();
-    failedWrites.current = new Map();
+    conversationItems.current = [];
+    folderItems.current = [];
+
     creating.current = false;
     retrying.current = false;
     folderBusy.current = false;
@@ -85,28 +231,93 @@ export function useCloudConversations(
         try {
           await getValidSession(ownerId);
 
-          if (current !== generation.current) return;
+          if (current !== generation.current) {
+            return;
+          }
 
-          const [conversationItems, folderItems] =
+          const [loadedConversations, loadedFolders] =
             await Promise.all([
               repository.load(ownerId),
               repository.loadFolders(ownerId),
             ]);
 
-          if (current !== generation.current) return;
+          if (current !== generation.current) {
+            return;
+          }
 
+          const cachedRows = readDrafts(ownerId);
+          const pending = new Map<string, StoredMessage>();
+
+          // 已經存在於雲端的回答，不再列入重試清單。
+          for (const row of cachedRows) {
+            const conversation = loadedConversations.find(
+              (item) => item.id === row.conversation_id
+            );
+
+            const alreadySaved = conversation?.messages.some(
+              (message) => message.id === row.id
+            );
+
+            if (!alreadySaved) {
+              pending.set(row.id, row);
+            }
+          }
+
+          const restoredConversations: Conversation[] =
+            loadedConversations.map((conversation) => {
+              const restoredRows = Array.from(pending.values())
+                .filter(
+                  (row) =>
+                    row.conversation_id === conversation.id
+                )
+                .sort((a, b) =>
+                  a.created_at.localeCompare(b.created_at)
+                );
+
+              if (restoredRows.length === 0) {
+                return conversation;
+              }
+
+              return {
+                ...conversation,
+                messages: [
+                  ...conversation.messages,
+                  ...restoredRows.map((row) => ({
+                    id: row.id,
+                    role: "assistant" as const,
+                    content: row.content,
+                    pending: false,
+                  })),
+                ],
+              };
+            });
+
+          failedWrites.current = pending;
+          writeDrafts(ownerId, Array.from(pending.values()));
+
+          conversationItems.current = restoredConversations;
+          folderItems.current = loadedFolders;
           loadedOwner.current = ownerId;
-          setConversations(conversationItems);
-          setFolders(folderItems);
-          setActiveConversationId(
-            conversationItems[0]?.id ?? null
-          );
-        } catch (cause) {
-          if (current !== generation.current) return;
 
-          setError(
-            `無法讀取雲端對話：${getErrorMessage(cause)}`
+          setConversations(restoredConversations);
+          setFolders(loadedFolders);
+          setUnsavedCount(pending.size);
+
+          setActiveConversationId(
+            restoredConversations[0]?.id ?? null
           );
+
+          if (pending.size > 0) {
+            setError(
+              "已復原尚未存入雲端的回答，請按「重試儲存」。"
+            );
+          }
+        } catch (cause) {
+          if (current === generation.current) {
+            setError(
+              `無法讀取雲端對話：${getErrorMessage(cause)}`
+            );
+          }
         } finally {
           if (current === generation.current) {
             setLoading(false);
@@ -117,8 +328,39 @@ export function useCloudConversations(
 
     return () => {
       generation.current++;
+
+      for (const controller of requests.current) {
+        controller.abort();
+      }
+
+      requests.current.clear();
     };
   }, [userId, reloadVersion]);
+
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (
+        busy.current.size === 0 &&
+        failedWrites.current.size === 0 &&
+        !creating.current &&
+        !retrying.current
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener(
+        "beforeunload",
+        handleBeforeUnload
+      );
+    };
+  }, []);
 
   const ready = Boolean(
     userId &&
@@ -126,50 +368,32 @@ export function useCloudConversations(
       !loading
   );
 
-  async function ensureSession(
-    ownerId: string,
-    current: number
-  ) {
-    if (current !== generation.current) {
-      throw new Error("登入狀態已變更。");
-    }
-
-    await getValidSession(ownerId);
-
-    if (current !== generation.current) {
-      throw new Error("登入狀態已變更。");
-    }
-  }
-
-  // 聊天與標題共用：
-  // 檢查憑證，收到 401 後更新憑證並重試一次。
   async function callChatApi(
-    path: "/api/chat" | "/api/chat/title",
     ownerId: string,
     question: string,
-    current: number
-  ): Promise<Record<string, unknown>> {
-    function checkCurrent() {
-      if (current !== generation.current) {
-        throw new Error("登入狀態已變更。");
-      }
-    }
-
-    checkCurrent();
+    current: number,
+    onText: (text: string) => void
+  ): Promise<string> {
+    checkCurrent(current);
 
     let session = await getValidSession(ownerId);
-
-    checkCurrent();
+    checkCurrent(current);
 
     const controller = new AbortController();
-    const timer = window.setTimeout(
-      () => controller.abort(),
-      55_000
-    );
+    requests.current.add(controller);
+
+    let timedOut = false;
+
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
 
     try {
       async function send(accessToken: string) {
-        return fetch(path, {
+        checkCurrent(current);
+
+        return fetch("/api/chat", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -177,41 +401,44 @@ export function useCloudConversations(
           },
           body: JSON.stringify({
             message: question,
+            stream: true,
           }),
           signal: controller.signal,
+          cache: "no-store",
         });
       }
 
       let response = await send(session.access_token);
+      checkCurrent(current);
 
-      checkCurrent();
-
+      // 僅在尚未讀取回答且收到 401 時，更新憑證並重試一次。
       if (response.status === 401) {
-        session = await getValidSession(ownerId, true);
+        try {
+          await response.body?.cancel();
+        } catch {
+          // 回應可能已經關閉。
+        }
 
-        checkCurrent();
+        session = await getValidSession(ownerId, true);
+        checkCurrent(current);
 
         response = await send(session.access_token);
-      }
-
-      const result: unknown = await response
-        .json()
-        .catch(() => null);
-
-      checkCurrent();
-
-      const data =
-        result &&
-        typeof result === "object" &&
-        !Array.isArray(result)
-          ? (result as Record<string, unknown>)
-          : null;
-
-      if (response.status === 401) {
-        throw new Error("登入已失效，請重新登入。");
+        checkCurrent(current);
       }
 
       if (!response.ok) {
+        const result: unknown = await response
+          .json()
+          .catch(() => null);
+
+        checkCurrent(current);
+
+        const data = asRecord(result);
+
+        if (response.status === 401) {
+          throw new Error("登入已失效，請重新登入。");
+        }
+
         throw new Error(
           typeof data?.error === "string"
             ? data.error
@@ -219,46 +446,202 @@ export function useCloudConversations(
         );
       }
 
-      if (!data) {
-        throw new Error("伺服器回傳格式不正確。");
+      const contentType =
+        response.headers.get("content-type")?.toLowerCase() ?? "";
+
+      // 相容目前仍回傳 { reply } 的非串流後端。
+      if (!contentType.includes("application/x-ndjson")) {
+        const result: unknown = await response
+          .json()
+          .catch(() => null);
+
+        checkCurrent(current);
+
+        const data = asRecord(result);
+
+        if (typeof data?.error === "string") {
+          throw new Error(data.error);
+        }
+
+        if (
+          typeof data?.reply !== "string" ||
+          !data.reply.trim()
+        ) {
+          throw new Error("伺服器沒有回傳有效回答。");
+        }
+
+        const reply = data.reply.trim();
+        onText(reply);
+        return reply;
       }
 
-      return data;
+      if (!response.body) {
+        throw new Error("伺服器沒有提供串流內容。");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      let buffer = "";
+      let accumulated = "";
+      let finalReply: string | null = null;
+      let lastDisplayed = "";
+
+      function consumeLine(line: string) {
+        checkCurrent(current);
+
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+          return;
+        }
+
+        let parsed: unknown;
+
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          throw new Error("AI 串流格式不正確，請重試。");
+        }
+
+        const event = asRecord(parsed);
+
+        if (!event) {
+          throw new Error("AI 串流格式不正確，請重試。");
+        }
+
+        if (event.type === "error") {
+          throw new Error(
+            typeof event.error === "string"
+              ? event.error
+              : "AI 回答中斷，請重試。"
+          );
+        }
+
+        if (finalReply !== null) {
+          throw new Error("AI 串流順序不正確，請重試。");
+        }
+
+        if (event.type === "delta") {
+          if (typeof event.text !== "string") {
+            throw new Error("AI 串流文字格式不正確。");
+          }
+
+          accumulated += event.text;
+          return;
+        }
+
+        if (event.type === "done") {
+          if (
+            typeof event.reply !== "string" ||
+            !event.reply.trim()
+          ) {
+            throw new Error("AI 沒有回傳有效回答，請重試。");
+          }
+
+          finalReply = event.reply.trim();
+          accumulated = finalReply;
+          return;
+        }
+
+        throw new Error("收到未知的 AI 串流事件。");
+      }
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          checkCurrent(current);
+
+          buffer += done
+            ? decoder.decode()
+            : decoder.decode(value, { stream: true });
+
+          let newline = buffer.indexOf("\n");
+
+          while (newline !== -1) {
+            consumeLine(buffer.slice(0, newline));
+            buffer = buffer.slice(newline + 1);
+            newline = buffer.indexOf("\n");
+          }
+
+          if (done && buffer.trim()) {
+            consumeLine(buffer);
+            buffer = "";
+          }
+
+          if (accumulated !== lastDisplayed) {
+            lastDisplayed = accumulated;
+            onText(accumulated);
+          }
+
+          if (finalReply !== null) {
+            return finalReply;
+          }
+
+          if (done) {
+            throw new Error(
+              "AI 連線中斷，回答尚未完成，請重試。"
+            );
+          }
+        }
+      } finally {
+        // 清理連線失敗，不應把已完成的回答變成失敗。
+        try {
+          await reader.cancel();
+        } catch {
+          // 連線可能已經關閉。
+        }
+
+        reader.releaseLock();
+      }
     } catch (cause) {
-      if (controller.signal.aborted) {
+      if (current !== generation.current) {
+        throw new Error("登入狀態已變更。");
+      }
+
+      if (timedOut) {
         throw new Error("AI 回覆逾時，請稍後再試。");
       }
 
       throw cause;
     } finally {
       window.clearTimeout(timer);
+      requests.current.delete(controller);
+      controller.abort();
     }
   }
 
   async function createConversation(title = "新問題") {
-    if (!userId || !ready || creating.current) {
+    if (
+      !userId ||
+      !ready ||
+      creating.current ||
+      folderBusy.current ||
+      retrying.current
+    ) {
       return null;
     }
 
+    const ownerId = userId;
     const current = generation.current;
     creating.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
       const conversation = await repository.create(
-        userId,
-        title
+        ownerId,
+        title.trim() || "新問題"
       );
 
-      if (current !== generation.current) return null;
+      checkCurrent(current);
 
-      setConversations((items) => [
+      updateConversations((items) => [
         conversation,
         ...items,
       ]);
-      setActiveConversationId(conversation.id);
 
+      setActiveConversationId(conversation.id);
       return conversation;
     } catch (cause) {
       if (current === generation.current) {
@@ -289,20 +672,20 @@ export function useCloudConversations(
       return null;
     }
 
+    const ownerId = userId;
     const current = generation.current;
     folderBusy.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
       const folder = await repository.createFolder(
-        userId,
+        ownerId,
         trimmedName
       );
 
-      if (current !== generation.current) return null;
-
-      setFolders((items) => [folder, ...items]);
+      checkCurrent(current);
+      updateFolders((items) => [folder, ...items]);
 
       return folder;
     } catch (cause) {
@@ -328,34 +711,38 @@ export function useCloudConversations(
       return false;
     }
 
-    const folder = folders.find(
+    const folder = folderItems.current.find(
       (item) => item.id === folderId
     );
-    const conversationExists = conversations.some(
+
+    const conversationExists = conversationItems.current.some(
       (item) => item.id === conversationId
     );
 
-    if (!folder || !conversationExists) return false;
+    if (!folder || !conversationExists) {
+      return false;
+    }
 
     if (folder.conversationIds.includes(conversationId)) {
       return true;
     }
 
+    const ownerId = userId;
     const current = generation.current;
     folderBusy.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
       await repository.addConversationToFolder(
-        userId,
+        ownerId,
         folderId,
         conversationId
       );
 
-      if (current !== generation.current) return false;
+      checkCurrent(current);
 
-      setFolders((items) =>
+      updateFolders((items) =>
         items.map((item) =>
           item.id !== folderId
             ? item
@@ -395,30 +782,42 @@ export function useCloudConversations(
       return false;
     }
 
+    const folder = folderItems.current.find(
+      (item) => item.id === folderId
+    );
+
+    if (!folder) {
+      return false;
+    }
+
+    if (!folder.conversationIds.includes(conversationId)) {
+      return true;
+    }
+
+    const ownerId = userId;
     const current = generation.current;
     folderBusy.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
       await repository.removeConversationFromFolder(
-        userId,
+        ownerId,
         folderId,
         conversationId
       );
 
-      if (current !== generation.current) return false;
+      checkCurrent(current);
 
-      setFolders((items) =>
+      updateFolders((items) =>
         items.map((item) =>
           item.id !== folderId
             ? item
             : {
                 ...item,
-                conversationIds:
-                  item.conversationIds.filter(
-                    (id) => id !== conversationId
-                  ),
+                conversationIds: item.conversationIds.filter(
+                  (id) => id !== conversationId
+                ),
               }
         )
       );
@@ -448,33 +847,40 @@ export function useCloudConversations(
       busy.current.size > 0 ||
       failedWrites.current.size > 0 ||
       creating.current ||
-      folderBusy.current
+      retrying.current ||
+      folderBusy.current ||
+      updatingTitles.current.size > 0
     ) {
       return false;
     }
 
+    if (
+      !conversationItems.current.some(
+        (item) => item.id === conversationId
+      )
+    ) {
+      return false;
+    }
+
+    const ownerId = userId;
     const current = generation.current;
     folderBusy.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
       await repository.deleteConversation(
-        userId,
+        ownerId,
         conversationId
       );
 
-      if (current !== generation.current) return false;
+      checkCurrent(current);
 
-      const remaining = conversations.filter(
-        (item) => item.id !== conversationId
-      );
-
-      setConversations((items) =>
+      updateConversations((items) =>
         items.filter((item) => item.id !== conversationId)
       );
 
-      setFolders((items) =>
+      updateFolders((items) =>
         items.map((folder) => ({
           ...folder,
           conversationIds: folder.conversationIds.filter(
@@ -483,10 +889,10 @@ export function useCloudConversations(
         }))
       );
 
+      const nextId = conversationItems.current[0]?.id ?? null;
+
       setActiveConversationId((activeId) =>
-        activeId === conversationId
-          ? remaining[0]?.id ?? null
-          : activeId
+        activeId === conversationId ? nextId : activeId
       );
 
       return true;
@@ -505,35 +911,21 @@ export function useCloudConversations(
     }
   }
 
-  async function generateConversationTitle(
+  async function saveConversationTitle(
     ownerId: string,
     conversationId: string,
     question: string,
     current: number
   ) {
-    if (current !== generation.current) return;
-
-    let title = fallbackTitle(question);
-
-    try {
-      const data = await callChatApi(
-        "/api/chat/title",
-        ownerId,
-        question,
-        current
-      );
-
-      if (
-        typeof data.title === "string" &&
-        data.title.trim()
-      ) {
-        title = data.title.trim();
-      }
-    } catch {
-      // 標題 API 失敗時，使用問題前十四字。
+    if (
+      current !== generation.current ||
+      updatingTitles.current.has(conversationId)
+    ) {
+      return;
     }
 
-    if (current !== generation.current) return;
+    const title = fallbackTitle(question);
+    updatingTitles.current.add(conversationId);
 
     try {
       await ensureSession(ownerId, current);
@@ -544,22 +936,21 @@ export function useCloudConversations(
         title
       );
 
-      if (current !== generation.current) return;
+      checkCurrent(current);
 
-      setConversations((items) =>
+      updateConversations((items) =>
         items.map((item) =>
           item.id === conversationId
             ? { ...item, title }
             : item
         )
       );
-    } catch (cause) {
-      if (current !== generation.current) return;
-
-      if (!failedWrites.current.size) {
-        setError(
-          `對話內容已儲存，但標題未更新：${getErrorMessage(cause)}`
-        );
+    } catch {
+      // 標題是輔助功能；失敗時保留原標題，
+      // 不覆蓋聊天或儲存失敗的提示。
+    } finally {
+      if (current === generation.current) {
+        updatingTitles.current.delete(conversationId);
       }
     }
   }
@@ -569,7 +960,9 @@ export function useCloudConversations(
   ): Promise<boolean> {
     question = question.trim();
 
-    if (!question) return false;
+    if (!question) {
+      return false;
+    }
 
     if (!userId) {
       setError("請先登入再送出問題。");
@@ -577,72 +970,82 @@ export function useCloudConversations(
     }
 
     if (!ready) {
-      setError((previous) =>
-        previous ||
-        (loading
+      setError(
+        loading
           ? "對話資料仍在載入，請稍後再試。"
-          : "對話資料未載入成功，請重新載入對話。")
+          : "對話資料未載入成功，請重新載入對話。"
       );
+
+      return false;
+    }
+
+    if (question.length > MAX_MESSAGE_LENGTH) {
+      setError("每則問題最多 8,000 字元，請縮短後再送出。");
       return false;
     }
 
     if (failedWrites.current.size > 0) {
-      setError("有尚未儲存的回答，請先按「重試儲存」。");
+      setError(
+        "有尚未儲存的回答，請先按「重試儲存」。"
+      );
+
       return false;
     }
 
-    if (folderBusy.current) {
-      setError("資料夾操作尚未完成，請稍後再送出。");
-      return false;
-    }
-
-    if (question.length > 8000) {
-      setError("每則問題最多 8,000 字，請縮短後再送出。");
+    if (
+      busy.current.size > 0 ||
+      creating.current ||
+      retrying.current ||
+      folderBusy.current
+    ) {
+      setError("目前的操作尚未完成，請稍後再送出。");
       return false;
     }
 
     const ownerId = userId;
     const current = generation.current;
+
     let id = activeConversationId;
+    let questionSaved = false;
+
     const lockId = id ?? "draft";
 
-    if (busy.current.has(lockId)) return false;
-
-    setError("");
     busy.current.add(lockId);
     setBusyIds([...busy.current]);
+    setError("");
 
     try {
-      // 建立對話與儲存問題前，先檢查登入憑證。
       await ensureSession(ownerId, current);
 
-      const existing = conversations.find(
+      const existing = conversationItems.current.find(
         (item) => item.id === id
       );
 
-      const shouldGenerateTitle =
-        !id ||
-        (existing?.title === "新問題" &&
-          existing.messages.length === 0);
+      if (id && !existing) {
+        throw new Error("找不到目前的對話，請重新選擇對話。");
+      }
+
+      const shouldUpdateTitle = Boolean(
+        existing &&
+          existing.title === "新問題" &&
+          existing.messages.length === 0
+      );
 
       if (!id) {
         const created = await createConversation(
           fallbackTitle(question)
         );
 
-        if (
-          !created ||
-          current !== generation.current
-        ) {
+        if (!created) {
           return false;
         }
+
+        checkCurrent(current);
 
         id = created.id;
         busy.current.add(id);
         setBusyIds([...busy.current]);
       }
-
-      if (!id) return false;
 
       const conversationId = id;
 
@@ -655,14 +1058,16 @@ export function useCloudConversations(
         created_at: new Date().toISOString(),
       };
 
-      // 問題成功儲存後，才送給 AI。
       await repository.saveMessage(userMessage);
+      questionSaved = true;
 
-      if (current !== generation.current) return true;
+      if (current !== generation.current) {
+        return true;
+      }
 
       const replyId = crypto.randomUUID();
 
-      setConversations((items) =>
+      updateConversations((items) =>
         items.map((item) =>
           item.id !== conversationId
             ? item
@@ -687,29 +1092,54 @@ export function useCloudConversations(
         )
       );
 
-      let reply: string;
-
-      try {
-        const data = await callChatApi(
-          "/api/chat",
+      if (shouldUpdateTitle) {
+        void saveConversationTitle(
           ownerId,
+          conversationId,
           question,
           current
         );
+      }
 
-        if (
-          typeof data.reply !== "string" ||
-          !data.reply.trim()
-        ) {
-          throw new Error("AI 沒有回傳有效回答，請重試。");
+      let reply: string;
+
+      try {
+        reply = await callChatApi(
+          ownerId,
+          question,
+          current,
+          (text) => {
+            if (current !== generation.current) {
+              return;
+            }
+
+            updateConversations((items) =>
+              items.map((item) =>
+                item.id !== conversationId
+                  ? item
+                  : {
+                      ...item,
+                      messages: item.messages.map((message) =>
+                        message.id !== replyId
+                          ? message
+                          : {
+                              ...message,
+                              content: text,
+                              pending: false,
+                            }
+                      ),
+                    }
+              )
+            );
+          }
+        );
+      } catch (cause) {
+        if (current !== generation.current) {
+          return true;
         }
 
-        reply = data.reply.trim();
-      } catch (cause) {
-        if (current !== generation.current) return true;
-
-        // 移除等待中的回答，保留已儲存的問題。
-        setConversations((items) =>
+        // 不把中斷的部分回答當成完整回答保存。
+        updateConversations((items) =>
           items.map((item) =>
             item.id !== conversationId
               ? item
@@ -723,13 +1153,16 @@ export function useCloudConversations(
         );
 
         setError(
-          `問題已存入雲端，但未取得 AI 回覆：${getErrorMessage(cause)}`
+          "問題已存入雲端，但 AI 回答未完成：" +
+            getErrorMessage(cause)
         );
 
         return true;
       }
 
-      if (current !== generation.current) return true;
+      if (current !== generation.current) {
+        return true;
+      }
 
       const assistantMessage: StoredMessage = {
         id: replyId,
@@ -740,7 +1173,7 @@ export function useCloudConversations(
         created_at: new Date().toISOString(),
       };
 
-      setConversations((items) =>
+      updateConversations((items) =>
         items.map((item) =>
           item.id !== conversationId
             ? item
@@ -754,39 +1187,40 @@ export function useCloudConversations(
                         id: replyId,
                         role: "assistant",
                         content: reply,
+                        pending: false,
                       }
                 ),
               }
         )
       );
 
+      // 先暫存完整回答，再嘗試寫入雲端。
+      failedWrites.current.set(replyId, assistantMessage);
+      const locallyCached = persistDrafts(ownerId);
+      setUnsavedCount(failedWrites.current.size);
+
       try {
         await ensureSession(ownerId, current);
         await repository.saveMessage(assistantMessage);
-      } catch (cause) {
-        if (current !== generation.current) return true;
 
-        failedWrites.current.set(
-          replyId,
-          assistantMessage
-        );
+        if (current !== generation.current) {
+          return true;
+        }
+
+        failedWrites.current.delete(replyId);
+        persistDrafts(ownerId);
         setUnsavedCount(failedWrites.current.size);
+      } catch (cause) {
+        if (current !== generation.current) {
+          return true;
+        }
 
         setError(
           "AI 回覆尚未存入雲端，請按「重試儲存」。" +
+            (locallyCached
+              ? ""
+              : "瀏覽器暫存也無法使用，請先不要重新整理或關閉分頁。") +
             `原因：${getErrorMessage(cause)}`
-        );
-      }
-
-      if (
-        shouldGenerateTitle &&
-        current === generation.current
-      ) {
-        await generateConversationTitle(
-          ownerId,
-          conversationId,
-          question,
-          current
         );
       }
 
@@ -794,16 +1228,21 @@ export function useCloudConversations(
     } catch (cause) {
       if (current === generation.current) {
         setError(
-          `問題未存成功，尚未送給 AI：${getErrorMessage(cause)}`
+          (questionSaved
+            ? "問題已存入雲端，但後續操作失敗："
+            : "問題未存成功，尚未送給 AI：") +
+            getErrorMessage(cause)
         );
       }
 
-      return false;
+      return questionSaved;
     } finally {
       if (current === generation.current) {
         busy.current.delete(lockId);
 
-        if (id) busy.current.delete(id);
+        if (id) {
+          busy.current.delete(id);
+        }
 
         setBusyIds([...busy.current]);
       }
@@ -811,28 +1250,52 @@ export function useCloudConversations(
   }
 
   async function retrySaving() {
-    if (!userId || !ready || retrying.current) return;
+    if (
+      !userId ||
+      !ready ||
+      retrying.current ||
+      busy.current.size > 0 ||
+      creating.current ||
+      folderBusy.current
+    ) {
+      return;
+    }
 
+    if (failedWrites.current.size === 0) {
+      return;
+    }
+
+    const ownerId = userId;
     const current = generation.current;
     retrying.current = true;
 
     try {
-      await ensureSession(userId, current);
+      await ensureSession(ownerId, current);
 
-      for (const [id, row] of failedWrites.current) {
-        if (current !== generation.current) return;
+      const rows = Array.from(failedWrites.current.entries());
+
+      for (const [id, row] of rows) {
+        checkCurrent(current);
+
+        const conversationExists = conversationItems.current.some(
+          (item) => item.id === row.conversation_id
+        );
+
+        if (!conversationExists) {
+          throw new Error(
+            "未儲存回答所屬的對話已不存在，無法寫回原對話。"
+          );
+        }
 
         await repository.saveMessage(row);
-
-        if (current !== generation.current) return;
+        checkCurrent(current);
 
         failedWrites.current.delete(id);
+        persistDrafts(ownerId);
         setUnsavedCount(failedWrites.current.size);
       }
 
-      if (current === generation.current) {
-        setError("");
-      }
+      setError("");
     } catch (cause) {
       if (current === generation.current) {
         setError(
@@ -852,8 +1315,15 @@ export function useCloudConversations(
       failedWrites.current.size > 0 ||
       creating.current ||
       retrying.current ||
-      folderBusy.current
+      folderBusy.current ||
+      updatingTitles.current.size > 0
     ) {
+      setError(
+        failedWrites.current.size > 0
+          ? "請先完成「重試儲存」，再重新載入對話。"
+          : "目前的操作尚未完成，請稍後再重新載入。"
+      );
+
       return;
     }
 
@@ -863,8 +1333,7 @@ export function useCloudConversations(
   return {
     conversations: ready ? conversations : [],
     folders: ready ? folders : [],
-    activeConversationId:
-      ready ? activeConversationId : null,
+    activeConversationId: ready ? activeConversationId : null,
 
     setActiveConversationId,
 
@@ -872,9 +1341,7 @@ export function useCloudConversations(
     ready,
     error,
 
-    busy: busyIds.includes(
-      activeConversationId ?? "draft"
-    ),
+    busy: busyIds.length > 0,
     busyAny: busyIds.length > 0,
     unsavedCount,
 
