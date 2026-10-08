@@ -8,7 +8,7 @@ import {
   readGoogleConnection,
   requireCalendarOrigin,
   requireCalendarUser,
-} from "@/lib/google/calendar/calendarServer";
+} from "@/lib/google/calendarServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
