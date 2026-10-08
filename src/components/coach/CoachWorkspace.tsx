@@ -25,13 +25,11 @@ export function CoachWorkspace({
   onProfile,
   chat,
 }: CoachWorkspaceProps) {
-  const [mobileView, setMobileView] =
-    useState<"plan" | "coach">("coach");
+  const [mobileView, setMobileView] = useState<"plan" | "coach">("coach");
 
   const activeConversation =
     chat.conversations.find(
-      (conversation) =>
-        conversation.id === chat.activeConversationId
+      (conversation) => conversation.id === chat.activeConversationId,
     ) ??
     chat.conversations[0] ??
     null;
@@ -71,16 +69,12 @@ export function CoachWorkspace({
     setMobileView("coach");
   }
 
-  async function sendQuestion(
-    question: string
-  ): Promise<boolean> {
+  async function sendQuestion(question: string): Promise<boolean> {
     const success = await chat.sendMessage(question);
 
     if (!success) {
       if (chat.unsavedCount > 0) {
-        notify(
-          "尚有訊息未成功存入雲端，請先重試儲存"
-        );
+        notify("尚有訊息未成功存入雲端，請先重試儲存");
       } else {
         notify("問題送出失敗，請稍後再試");
       }
@@ -89,9 +83,7 @@ export function CoachWorkspace({
     return success;
   }
 
-  async function createFolder(
-    name: string
-  ): Promise<boolean> {
+  async function createFolder(name: string): Promise<boolean> {
     if (chat.busyAny) {
       notify("請先等待目前的 AI 回覆完成");
       return false;
@@ -115,7 +107,7 @@ export function CoachWorkspace({
 
   async function addConversationToFolder(
     folderId: string,
-    conversationId: string
+    conversationId: string,
   ): Promise<boolean> {
     if (chat.busyAny) {
       notify("請先等待目前的 AI 回覆完成");
@@ -127,11 +119,10 @@ export function CoachWorkspace({
       return false;
     }
 
-    const success =
-      await chat.addConversationToFolder(
-        folderId,
-        conversationId
-      );
+    const success = await chat.addConversationToFolder(
+      folderId,
+      conversationId,
+    );
 
     if (!success) {
       notify("加入資料夾失敗");
@@ -144,18 +135,17 @@ export function CoachWorkspace({
 
   async function removeConversationFromFolder(
     folderId: string,
-    conversationId: string
+    conversationId: string,
   ): Promise<boolean> {
     if (chat.busyAny) {
       notify("請先等待目前的 AI 回覆完成");
       return false;
     }
 
-    const success =
-      await chat.removeConversationFromFolder(
-        folderId,
-        conversationId
-      );
+    const success = await chat.removeConversationFromFolder(
+      folderId,
+      conversationId,
+    );
 
     if (!success) {
       notify("移出資料夾失敗");
@@ -166,9 +156,7 @@ export function CoachWorkspace({
     return true;
   }
 
-  async function deleteConversation(
-    conversationId: string
-  ): Promise<boolean> {
+  async function deleteConversation(conversationId: string): Promise<boolean> {
     if (chat.busyAny) {
       notify("請先等待目前的 AI 回覆完成");
       return false;
@@ -179,8 +167,7 @@ export function CoachWorkspace({
       return false;
     }
 
-    const success =
-      await chat.deleteConversation(conversationId);
+    const success = await chat.deleteConversation(conversationId);
 
     if (!success) {
       notify("刪除對話失敗");
@@ -214,16 +201,11 @@ export function CoachWorkspace({
           onNewConversation={createNewConversation}
           onCreateFolder={createFolder}
           onAddToFolder={addConversationToFolder}
-          onRemoveFromFolder={
-            removeConversationFromFolder
-          }
+          onRemoveFromFolder={removeConversationFromFolder}
           onDeleteConversation={deleteConversation}
         />
 
-        <TodoPanel
-          taskStore={taskStore}
-          notify={notify}
-        />
+        <TodoPanel taskStore={taskStore} notify={notify} />
       </aside>
 
       <div
@@ -265,6 +247,9 @@ export function CoachWorkspace({
           title={title}
           messages={messages}
           busy={chat.busy}
+          canStop={chat.canStop}
+          onStop={chat.stopGeneration}
+          disabled={!chat.ready}
           onSend={sendQuestion}
           onNewConversation={createNewConversation}
         />
