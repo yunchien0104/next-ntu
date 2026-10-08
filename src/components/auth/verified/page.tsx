@@ -33,7 +33,7 @@ export default function VerifiedPage() {
           </p>
 
           <a
-            href="/"
+            href="https://next-ntu.vercel.app/"
             className="login-submit"
             style={{
               display: "grid",
