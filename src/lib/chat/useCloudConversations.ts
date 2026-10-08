@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import {
+  supabase,
+  getValidSession,
+} from "@/lib/supabase";
 import type { Conversation } from "@/lib/types";
-
 import {
   createChatRepository,
   type ChatFolder,
@@ -14,6 +16,14 @@ const repository = createChatRepository(supabase);
 
 function getErrorMessage(cause: unknown) {
   if (cause instanceof Error) return cause.message;
+
+  if (
+    cause &&
+    typeof cause === "object" &&
+    "message" in cause
+  ) {
+    return String(cause.message);
+  }
 
   return "操作失敗，請稍後再試。";
 }
@@ -29,10 +39,7 @@ export function useCloudConversations(
 ) {
   const [conversations, setConversations] =
     useState<Conversation[]>([]);
-
-  const [folders, setFolders] =
-    useState<ChatFolder[]>([]);
-
+  const [folders, setFolders] = useState<ChatFolder[]>([]);
   const [activeConversationId, setActiveConversationId] =
     useState<string | null>(null);
 
@@ -44,8 +51,9 @@ export function useCloudConversations(
 
   const generation = useRef(0);
   const busy = useRef(new Set<string>());
-  const failedWrites =
-    useRef(new Map<string, StoredMessage>());
+  const failedWrites = useRef(
+    new Map<string, StoredMessage>()
+  );
 
   const creating = useRef(false);
   const retrying = useRef(false);
@@ -58,7 +66,6 @@ export function useCloudConversations(
     loadedOwner.current = null;
     busy.current = new Set();
     failedWrites.current = new Map();
-
     creating.current = false;
     retrying.current = false;
     folderBusy.current = false;
@@ -72,31 +79,40 @@ export function useCloudConversations(
     setLoading(Boolean(userId));
 
     if (userId) {
-      Promise.all([
-        repository.load(userId),
-        repository.loadFolders(userId),
-      ])
-        .then(([conversationItems, folderItems]) => {
+      const ownerId = userId;
+
+      void (async () => {
+        try {
+          await getValidSession(ownerId);
+
           if (current !== generation.current) return;
 
-          loadedOwner.current = userId;
+          const [conversationItems, folderItems] =
+            await Promise.all([
+              repository.load(ownerId),
+              repository.loadFolders(ownerId),
+            ]);
+
+          if (current !== generation.current) return;
+
+          loadedOwner.current = ownerId;
           setConversations(conversationItems);
           setFolders(folderItems);
           setActiveConversationId(
             conversationItems[0]?.id ?? null
           );
-          setLoading(false);
-        })
-        .catch((cause: unknown) => {
+        } catch (cause) {
           if (current !== generation.current) return;
 
-          console.error("Load chat data failed", cause);
-
           setError(
-            "無法讀取雲端對話或資料夾，請稍後重試。"
+            `無法讀取雲端對話：${getErrorMessage(cause)}`
           );
-          setLoading(false);
-        });
+        } finally {
+          if (current === generation.current) {
+            setLoading(false);
+          }
+        }
+      })();
     }
 
     return () => {
@@ -110,55 +126,79 @@ export function useCloudConversations(
       !loading
   );
 
-  // chat 與 title API 共用登入憑證和錯誤處理。
+  async function ensureSession(
+    ownerId: string,
+    current: number
+  ) {
+    if (current !== generation.current) {
+      throw new Error("登入狀態已變更。");
+    }
+
+    await getValidSession(ownerId);
+
+    if (current !== generation.current) {
+      throw new Error("登入狀態已變更。");
+    }
+  }
+
+  // 聊天與標題共用：
+  // 檢查憑證，收到 401 後更新憑證並重試一次。
   async function callChatApi(
     path: "/api/chat" | "/api/chat/title",
     ownerId: string,
     question: string,
     current: number
   ): Promise<Record<string, unknown>> {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    if (sessionError) throw sessionError;
-
-    if (!session || session.user.id !== ownerId) {
-      throw new Error("登入已失效，請重新登入。");
+    function checkCurrent() {
+      if (current !== generation.current) {
+        throw new Error("登入狀態已變更。");
+      }
     }
 
-    if (current !== generation.current) {
-      throw new Error("登入狀態已變更。");
-    }
+    checkCurrent();
+
+    let session = await getValidSession(ownerId);
+
+    checkCurrent();
 
     const controller = new AbortController();
-
     const timer = window.setTimeout(
       () => controller.abort(),
       55_000
     );
 
     try {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          message: question,
-        }),
-        signal: controller.signal,
-      });
+      async function send(accessToken: string) {
+        return fetch(path, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            message: question,
+          }),
+          signal: controller.signal,
+        });
+      }
+
+      let response = await send(session.access_token);
+
+      checkCurrent();
+
+      if (response.status === 401) {
+        session = await getValidSession(ownerId, true);
+
+        checkCurrent();
+
+        response = await send(session.access_token);
+      }
 
       const result: unknown = await response
         .json()
         .catch(() => null);
 
-      if (current !== generation.current) {
-        throw new Error("登入狀態已變更。");
-      }
+      checkCurrent();
 
       const data =
         result &&
@@ -195,9 +235,7 @@ export function useCloudConversations(
     }
   }
 
-  async function createConversation(
-    title = "新問題"
-  ) {
+  async function createConversation(title = "新問題") {
     if (!userId || !ready || creating.current) {
       return null;
     }
@@ -206,6 +244,8 @@ export function useCloudConversations(
     creating.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       const conversation = await repository.create(
         userId,
         title
@@ -222,8 +262,9 @@ export function useCloudConversations(
       return conversation;
     } catch (cause) {
       if (current === generation.current) {
-        console.error("Create conversation failed", cause);
-        setError("新對話未建立成功，請確認網路後重試。");
+        setError(
+          `新對話建立失敗：${getErrorMessage(cause)}`
+        );
       }
 
       return null;
@@ -252,6 +293,8 @@ export function useCloudConversations(
     folderBusy.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       const folder = await repository.createFolder(
         userId,
         trimmedName
@@ -264,8 +307,9 @@ export function useCloudConversations(
       return folder;
     } catch (cause) {
       if (current === generation.current) {
-        console.error("Create folder failed", cause);
-        setError("資料夾建立失敗，請稍後再試。");
+        setError(
+          `資料夾建立失敗：${getErrorMessage(cause)}`
+        );
       }
 
       return null;
@@ -287,7 +331,6 @@ export function useCloudConversations(
     const folder = folders.find(
       (item) => item.id === folderId
     );
-
     const conversationExists = conversations.some(
       (item) => item.id === conversationId
     );
@@ -302,6 +345,8 @@ export function useCloudConversations(
     folderBusy.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       await repository.addConversationToFolder(
         userId,
         folderId,
@@ -329,11 +374,9 @@ export function useCloudConversations(
       return true;
     } catch (cause) {
       if (current === generation.current) {
-        console.error(
-          "Add conversation to folder failed",
-          cause
+        setError(
+          `無法加入資料夾：${getErrorMessage(cause)}`
         );
-        setError("無法將對話加入資料夾，請稍後再試。");
       }
 
       return false;
@@ -356,6 +399,8 @@ export function useCloudConversations(
     folderBusy.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       await repository.removeConversationFromFolder(
         userId,
         folderId,
@@ -381,11 +426,9 @@ export function useCloudConversations(
       return true;
     } catch (cause) {
       if (current === generation.current) {
-        console.error(
-          "Remove conversation from folder failed",
-          cause
+        setError(
+          `無法移出資料夾：${getErrorMessage(cause)}`
         );
-        setError("無法將對話移出資料夾，請稍後再試。");
       }
 
       return false;
@@ -414,6 +457,8 @@ export function useCloudConversations(
     folderBusy.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       await repository.deleteConversation(
         userId,
         conversationId
@@ -447,8 +492,9 @@ export function useCloudConversations(
       return true;
     } catch (cause) {
       if (current === generation.current) {
-        console.error("Delete conversation failed", cause);
-        setError("無法永久刪除對話，請稍後再試。");
+        setError(
+          `無法刪除對話：${getErrorMessage(cause)}`
+        );
       }
 
       return false;
@@ -483,14 +529,15 @@ export function useCloudConversations(
       ) {
         title = data.title.trim();
       }
-    } catch (cause) {
-      // 標題產生失敗時，仍使用問題前十四字。
-      console.error("Title generation failed", cause);
+    } catch {
+      // 標題 API 失敗時，使用問題前十四字。
     }
 
     if (current !== generation.current) return;
 
     try {
+      await ensureSession(ownerId, current);
+
       await repository.title(
         ownerId,
         conversationId,
@@ -509,10 +556,10 @@ export function useCloudConversations(
     } catch (cause) {
       if (current !== generation.current) return;
 
-      console.error("Save conversation title failed", cause);
-
       if (!failedWrites.current.size) {
-        setError("對話內容已儲存，但短標題未更新。");
+        setError(
+          `對話內容已儲存，但標題未更新：${getErrorMessage(cause)}`
+        );
       }
     }
   }
@@ -522,13 +569,30 @@ export function useCloudConversations(
   ): Promise<boolean> {
     question = question.trim();
 
-    if (
-      !userId ||
-      !ready ||
-      !question ||
-      failedWrites.current.size > 0 ||
-      folderBusy.current
-    ) {
+    if (!question) return false;
+
+    if (!userId) {
+      setError("請先登入再送出問題。");
+      return false;
+    }
+
+    if (!ready) {
+      setError((previous) =>
+        previous ||
+        (loading
+          ? "對話資料仍在載入，請稍後再試。"
+          : "對話資料未載入成功，請重新載入對話。")
+      );
+      return false;
+    }
+
+    if (failedWrites.current.size > 0) {
+      setError("有尚未儲存的回答，請先按「重試儲存」。");
+      return false;
+    }
+
+    if (folderBusy.current) {
+      setError("資料夾操作尚未完成，請稍後再送出。");
       return false;
     }
 
@@ -537,6 +601,7 @@ export function useCloudConversations(
       return false;
     }
 
+    const ownerId = userId;
     const current = generation.current;
     let id = activeConversationId;
     const lockId = id ?? "draft";
@@ -548,6 +613,9 @@ export function useCloudConversations(
     setBusyIds([...busy.current]);
 
     try {
+      // 建立對話與儲存問題前，先檢查登入憑證。
+      await ensureSession(ownerId, current);
+
       const existing = conversations.find(
         (item) => item.id === id
       );
@@ -581,13 +649,13 @@ export function useCloudConversations(
       const userMessage: StoredMessage = {
         id: crypto.randomUUID(),
         conversation_id: conversationId,
-        user_id: userId,
+        user_id: ownerId,
         role: "user",
         content: question,
         created_at: new Date().toISOString(),
       };
 
-      // 問題存成功後，才呼叫 AI。
+      // 問題成功儲存後，才送給 AI。
       await repository.saveMessage(userMessage);
 
       if (current !== generation.current) return true;
@@ -624,7 +692,7 @@ export function useCloudConversations(
       try {
         const data = await callChatApi(
           "/api/chat",
-          userId,
+          ownerId,
           question,
           current
         );
@@ -640,9 +708,7 @@ export function useCloudConversations(
       } catch (cause) {
         if (current !== generation.current) return true;
 
-        console.error("Chat request failed", cause);
-
-        // 清除等待中的回答，不把錯誤存成 AI 訊息。
+        // 移除等待中的回答，保留已儲存的問題。
         setConversations((items) =>
           items.map((item) =>
             item.id !== conversationId
@@ -657,12 +723,9 @@ export function useCloudConversations(
         );
 
         setError(
-          `問題已存入雲端，但未取得 AI 回覆：${getErrorMessage(
-            cause
-          )}`
+          `問題已存入雲端，但未取得 AI 回覆：${getErrorMessage(cause)}`
         );
 
-        // 問題已保存，讓輸入框可以清空。
         return true;
       }
 
@@ -671,7 +734,7 @@ export function useCloudConversations(
       const assistantMessage: StoredMessage = {
         id: replyId,
         conversation_id: conversationId,
-        user_id: userId,
+        user_id: ownerId,
         role: "assistant",
         content: reply,
         created_at: new Date().toISOString(),
@@ -698,21 +761,20 @@ export function useCloudConversations(
       );
 
       try {
+        await ensureSession(ownerId, current);
         await repository.saveMessage(assistantMessage);
       } catch (cause) {
         if (current !== generation.current) return true;
-
-        console.error("Save reply failed", cause);
 
         failedWrites.current.set(
           replyId,
           assistantMessage
         );
-
         setUnsavedCount(failedWrites.current.size);
 
         setError(
-          "AI 回覆尚未存入雲端。請按「重試儲存」，成功前不要重新整理或登出。"
+          "AI 回覆尚未存入雲端，請按「重試儲存」。" +
+            `原因：${getErrorMessage(cause)}`
         );
       }
 
@@ -721,7 +783,7 @@ export function useCloudConversations(
         current === generation.current
       ) {
         await generateConversationTitle(
-          userId,
+          ownerId,
           conversationId,
           question,
           current
@@ -731,10 +793,8 @@ export function useCloudConversations(
       return true;
     } catch (cause) {
       if (current === generation.current) {
-        console.error("Save question failed", cause);
-
         setError(
-          "問題未存成功，尚未送給 AI。請確認網路後重新送出。"
+          `問題未存成功，尚未送給 AI：${getErrorMessage(cause)}`
         );
       }
 
@@ -751,12 +811,14 @@ export function useCloudConversations(
   }
 
   async function retrySaving() {
-    if (!ready || retrying.current) return;
+    if (!userId || !ready || retrying.current) return;
 
     const current = generation.current;
     retrying.current = true;
 
     try {
+      await ensureSession(userId, current);
+
       for (const [id, row] of failedWrites.current) {
         if (current !== generation.current) return;
 
@@ -773,10 +835,8 @@ export function useCloudConversations(
       }
     } catch (cause) {
       if (current === generation.current) {
-        console.error("Retry save failed", cause);
-
         setError(
-          "仍無法儲存，請確認網路與 Supabase 權限後重試。"
+          `仍無法儲存：${getErrorMessage(cause)}`
         );
       }
     } finally {
