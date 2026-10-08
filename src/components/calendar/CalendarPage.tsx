@@ -11,11 +11,7 @@ import {
 
 import { Button } from "@/components/ui/Button";
 import { FeatureHeader } from "@/components/ui/FeatureHeader";
-import {
-  Field,
-  inputClass,
-  Modal,
-} from "@/components/ui/Modal";
+import { Field, inputClass, Modal } from "@/components/ui/Modal";
 
 import { supabase } from "@/lib/supabase";
 import {
@@ -52,12 +48,41 @@ interface ImportResult {
   alreadyImported: boolean;
 }
 
+interface RequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 const emptyGoogleStatus: GoogleStatus = {
   connected: false,
   email: null,
   connectionId: null,
   needsReconnect: false,
 };
+
+const googleButtonClass =
+  "shrink-0 border border-[var(--line-strong)] px-3 py-2 " +
+  "text-xs font-semibold text-[var(--text)] transition " +
+  "hover:bg-[var(--panel-2)] disabled:cursor-not-allowed " +
+  "disabled:opacity-40";
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  message: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, milliseconds);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
 
 function getTaipeiToday(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -77,11 +102,7 @@ function monthFor(date: string): Date {
   const value = new Date(`${date}T00:00:00Z`);
 
   return new Date(
-    Date.UTC(
-      value.getUTCFullYear(),
-      value.getUTCMonth(),
-      1
-    )
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1)
   );
 }
 
@@ -151,9 +172,7 @@ export function CalendarPage({
   );
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] =
-    useState<string | null>(null);
-
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CalendarForm>(
     () => emptyForm(getTaipeiToday())
   );
@@ -167,10 +186,8 @@ export function CalendarPage({
   const [googleStatus, setGoogleStatus] =
     useState<GoogleStatus>(emptyGoogleStatus);
 
-  const [googleLoading, setGoogleLoading] = useState(true);
-  const [googleConnecting, setGoogleConnecting] =
-    useState(false);
-
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleConnecting, setGoogleConnecting] = useState(false);
   const [googleError, setGoogleError] = useState("");
   const [googleNotice, setGoogleNotice] = useState("");
 
@@ -178,16 +195,16 @@ export function CalendarPage({
   const operationRef = useRef(false);
   const connectingRef = useRef(false);
   const aliveRef = useRef(false);
-  const statusRevisionRef = useRef(0);
   const ownerRef = useRef<string | null>(null);
+  const statusRevisionRef = useRef(0);
+  const statusControllerRef = useRef<AbortController | null>(null);
 
   const editingTask =
-    taskStore.tasks.find((task) => task.id === editingId) ??
-    null;
+    taskStore.tasks.find((task) => task.id === editingId) ?? null;
 
-  const missingTask =
-    editingId !== null && editingTask === null;
+  const missingTask = editingId !== null && editingTask === null;
 
+  // 任務載入只限制任務操作，不再限制 Google 帳號操作。
   const blocked =
     !taskStore.ready ||
     taskStore.loading ||
@@ -197,86 +214,175 @@ export function CalendarPage({
 
   const mutationBlocked = blocked || missingTask;
 
+  const googleActionBlocked =
+    taskStore.busy ||
+    operation !== null ||
+    googleConnecting;
+
   const canImport =
     googleStatus.connected &&
     Boolean(googleStatus.connectionId) &&
-    !googleLoading;
+    !googleLoading &&
+    !googleConnecting;
 
-  // 每次請求都取得目前有效的 Supabase 登入憑證。
   const requestGoogle = useCallback(
     async <T,>(
       path: string,
       method: "GET" | "POST" = "GET",
-      body?: Record<string, unknown>
+      body?: Record<string, unknown>,
+      options: RequestOptions = {}
     ): Promise<T> => {
-      const { data, error } =
-        await supabase.auth.getSession();
+      const controller = new AbortController();
 
-      if (error || !data.session) {
-        throw new Error("請重新登入 Next@NTU");
+      const abortFromCaller = () => controller.abort();
+      const externalSignal = options.signal;
+
+      if (externalSignal?.aborted) {
+        throw new Error("查詢已取消");
       }
 
-      const session = data.session;
+      externalSignal?.addEventListener(
+        "abort",
+        abortFromCaller,
+        { once: true }
+      );
 
-      if (
-        ownerRef.current &&
-        ownerRef.current !== session.user.id
-      ) {
-        throw new Error("登入帳號已變更，請重新開啟日曆");
-      }
-
-      ownerRef.current = session.user.id;
-
-      let response: Response;
+      const timer = window.setTimeout(() => {
+        controller.abort();
+      }, options.timeoutMs ?? 30_000);
 
       try {
-        response = await fetch(path, {
+        // 登入狀態也有逾時限制，避免卡住整個查詢。
+        const { data, error } = await withTimeout(
+          supabase.auth.getSession(),
+          10_000,
+          "取得登入狀態逾時，請重新整理頁面；若仍失敗，請重新登入。"
+        );
+
+        if (controller.signal.aborted) {
+          throw new Error("查詢已取消或逾時");
+        }
+
+        if (error || !data.session) {
+          throw new Error("登入已失效，請重新登入 Next@NTU");
+        }
+
+        const session = data.session;
+
+        if (
+          ownerRef.current &&
+          ownerRef.current !== session.user.id
+        ) {
+          throw new Error("登入帳號已變更，請重新開啟日曆");
+        }
+
+        ownerRef.current = session.user.id;
+
+        const response = await fetch(path, {
           method,
           headers: {
             Authorization: `Bearer ${session.access_token}`,
-            ...(body
-              ? { "Content-Type": "application/json" }
-              : {}),
+            ...(body ? { "Content-Type": "application/json" } : {}),
           },
           ...(body ? { body: JSON.stringify(body) } : {}),
           credentials: "same-origin",
           cache: "no-store",
-          signal: AbortSignal.timeout(45_000),
+          signal: controller.signal,
         });
-      } catch {
-        throw new Error(
-          "連線中斷或逾時，請稍後重試同一筆操作"
+
+        const text = await response.text();
+
+        let result: unknown = null;
+
+        try {
+          result = JSON.parse(text);
+        } catch {
+          if (response.status === 404) {
+            throw new Error(
+              `找不到 API：${path}。請確認路由檔案已建立；正式網站需要部署最新版程式。`
+            );
+          }
+
+          throw new Error(
+            `API 未回傳有效資料（HTTP ${response.status}），請確認網站部署與伺服器設定。`
+          );
+        }
+
+        if (!response.ok) {
+          const message =
+            result &&
+            typeof result === "object" &&
+            "error" in result &&
+            typeof result.error === "string"
+              ? result.error
+              : `Google 日曆操作失敗（HTTP ${response.status}）`;
+
+          throw new Error(message);
+        }
+
+        if (
+          !result ||
+          typeof result !== "object" ||
+          Array.isArray(result)
+        ) {
+          throw new Error("伺服器回應不完整，請稍後重試");
+        }
+
+        return result as T;
+      } catch (error) {
+        if (externalSignal?.aborted) {
+          throw new Error("查詢已取消");
+        }
+
+        if (controller.signal.aborted) {
+          throw new Error(
+            "Google 日曆請求逾時，請按「重新確認帳號」或重試操作。"
+          );
+        }
+
+        if (
+          error instanceof TypeError ||
+          (error instanceof Error && error.name === "AbortError")
+        ) {
+          throw new Error(
+            "無法連線到伺服器，請檢查網路或稍後重試。"
+          );
+        }
+
+        throw error;
+      } finally {
+        window.clearTimeout(timer);
+        externalSignal?.removeEventListener(
+          "abort",
+          abortFromCaller
         );
       }
-
-      const result = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(
-          typeof result?.error === "string"
-            ? result.error
-            : "Google 日曆操作失敗，請稍後重試"
-        );
-      }
-
-      if (!result) {
-        throw new Error("伺服器回應不完整，請稍後重試");
-      }
-
-      return result as T;
     },
     []
   );
 
   const loadGoogleStatus = useCallback(async () => {
+    if (!aliveRef.current) return;
+
+    // 取消前次查詢；重新確認按鈕不會被載入狀態鎖住。
     const revision = ++statusRevisionRef.current;
+    statusControllerRef.current?.abort();
+
+    const controller = new AbortController();
+    statusControllerRef.current = controller;
 
     setGoogleLoading(true);
     setGoogleError("");
 
     try {
       const result = await requestGoogle<GoogleStatus>(
-        "/api/google/calendar/status"
+        "/api/google/calendar/status",
+        "GET",
+        undefined,
+        {
+          signal: controller.signal,
+          timeoutMs: 20_000,
+        }
       );
 
       if (
@@ -310,6 +416,7 @@ export function CalendarPage({
         aliveRef.current &&
         revision === statusRevisionRef.current
       ) {
+        statusControllerRef.current = null;
         setGoogleLoading(false);
       }
     }
@@ -319,12 +426,9 @@ export function CalendarPage({
     aliveRef.current = true;
     void loadGoogleStatus();
 
-    // 顯示 Google 授權回呼結果。
     const url = new URL(window.location.href);
     const result = url.searchParams.get("googleCalendar");
-    const message = url.searchParams.get(
-      "googleCalendarMessage"
-    );
+    const message = url.searchParams.get("googleCalendarMessage");
 
     if (result === "connected") {
       setGoogleNotice("Google 日曆已連接，請確認下方帳號。");
@@ -345,9 +449,23 @@ export function CalendarPage({
       );
     }
 
+    // 從 Google 頁面按上一頁返回時，恢復按鈕狀態。
+    function handlePageShow(event: PageTransitionEvent) {
+      if (!event.persisted) return;
+
+      connectingRef.current = false;
+      setGoogleConnecting(false);
+      void loadGoogleStatus();
+    }
+
+    window.addEventListener("pageshow", handlePageShow);
+
     return () => {
       aliveRef.current = false;
       statusRevisionRef.current++;
+      statusControllerRef.current?.abort();
+      statusControllerRef.current = null;
+      window.removeEventListener("pageshow", handlePageShow);
     };
   }, [loadGoogleStatus]);
 
@@ -423,9 +541,13 @@ export function CalendarPage({
   }, [taskStore.tasks]);
 
   async function connectGoogle() {
+    if (modalOpen) {
+      notify("請先儲存或關閉任務視窗，再連接 Google");
+      return;
+    }
+
     if (
-      blocked ||
-      modalOpen ||
+      googleActionBlocked ||
       operationRef.current ||
       connectingRef.current
     ) {
@@ -435,15 +557,27 @@ export function CalendarPage({
     connectingRef.current = true;
     setGoogleConnecting(true);
     setGoogleError("");
-    setGoogleNotice("");
+    setGoogleNotice("正在準備 Google 帳號選擇頁面…");
+
+    // 連接帳號不必等待狀態查詢完成。
+    statusRevisionRef.current++;
+    statusControllerRef.current?.abort();
+    statusControllerRef.current = null;
+    setGoogleLoading(false);
 
     let navigating = false;
 
     try {
       const result = await requestGoogle<{ url: string }>(
         "/api/google/calendar/connect",
-        "POST"
+        "POST",
+        undefined,
+        { timeoutMs: 30_000 }
       );
+
+      if (typeof result.url !== "string") {
+        throw new Error("伺服器未提供 Google 授權網址");
+      }
 
       const url = new URL(result.url);
 
@@ -456,11 +590,14 @@ export function CalendarPage({
 
       if (!aliveRef.current) return;
 
+      setGoogleNotice("正在前往 Google 選擇帳號…");
       window.location.assign(url.toString());
       navigating = true;
     } catch (error) {
       if (aliveRef.current) {
+        setGoogleNotice("");
         setGoogleError(errorMessage(error));
+        notify("Google 連接失敗，請查看頁面錯誤訊息");
       }
     } finally {
       if (!navigating) {
@@ -521,14 +658,8 @@ export function CalendarPage({
     setCursor(monthFor(date));
   }
 
-  function updateField(
-    field: keyof CalendarForm,
-    value: string
-  ) {
-    setForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+  function updateField(field: keyof CalendarForm, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
   }
 
   async function save(importToGoogle = false) {
@@ -545,7 +676,7 @@ export function CalendarPage({
 
     if (importToGoogle && !canImport) {
       setLocalError(
-        "請先儲存任務，再到日曆頁面連接 Google 帳號。"
+        "請先儲存任務，再到日曆頁面確認或連接 Google 帳號。"
       );
       return;
     }
@@ -614,8 +745,7 @@ export function CalendarPage({
 
       setCursor(monthFor(savedTask.date));
 
-      // 先記住已保存的任務 ID。
-      // Google 匯入失敗時，重試會沿用同一筆任務。
+      // 匯入失敗後沿用已儲存的任務，避免重複新增。
       setEditingId(savedTask.id);
       setForm(taskToForm(savedTask));
 
@@ -629,7 +759,8 @@ export function CalendarPage({
             taskId: savedTask.id,
             connectionId: expectedConnectionId,
             inviteGuests: shouldInvite,
-          }
+          },
+          { timeoutMs: 45_000 }
         );
 
         if (
@@ -668,12 +799,12 @@ export function CalendarPage({
     } catch (error) {
       if (!aliveRef.current) return;
 
-      const message = errorMessage(error);
-
       setLocalError(
         savedTask
-          ? `任務已存入 Next@NTU，但 Google 匯入未完成：${message} 你可以在這個視窗重試，不會另建一筆任務。`
-          : message
+          ? `任務已存入 Next@NTU，但 Google 匯入未完成：${errorMessage(
+              error
+            )} 可以在此視窗重試，不會另建任務。`
+          : errorMessage(error)
       );
 
       notify(
@@ -684,9 +815,7 @@ export function CalendarPage({
     } finally {
       operationRef.current = false;
 
-      if (aliveRef.current) {
-        setOperation(null);
-      }
+      if (aliveRef.current) setOperation(null);
     }
   }
 
@@ -704,8 +833,7 @@ export function CalendarPage({
     setLocalError("");
 
     try {
-      const success =
-        await taskStore.deleteTask(editingId);
+      const success = await taskStore.deleteTask(editingId);
 
       if (!success) {
         throw new Error("刪除失敗，任務仍保留，請重試。");
@@ -726,9 +854,7 @@ export function CalendarPage({
     } finally {
       operationRef.current = false;
 
-      if (aliveRef.current) {
-        setOperation(null);
-      }
+      if (aliveRef.current) setOperation(null);
     }
   }
 
@@ -762,41 +888,49 @@ export function CalendarPage({
             >
               ＋ 建立任務
             </Button>
+
             <Button onClick={() => changeMonth(-1)}>←</Button>
             <Button onClick={goToday}>今天</Button>
             <Button onClick={() => changeMonth(1)}>→</Button>
-            <Button
-              disabled={blocked || modalOpen || googleLoading}
+
+            <button
+              type="button"
+              className={googleButtonClass}
+              disabled={googleActionBlocked || modalOpen}
               onClick={() => void connectGoogle()}
             >
               {connectLabel}
-            </Button>
+            </button>
           </>
         }
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] bg-[var(--panel)] px-5 py-3">
-        <div className="min-w-0 text-xs">
+        <div className="min-w-0 text-xs" aria-live="polite">
           <p className="break-all text-[var(--text)]">
             {googleLoading
               ? "正在確認 Google 日曆帳號…"
-              : googleStatus.connected
-                ? `已連接：${googleStatus.email}`
-                : googleStatus.needsReconnect
-                  ? `需要重新授權：${googleStatus.email}`
-                  : "尚未連接 Google 日曆"}
+              : googleError
+                ? "Google 帳號確認失敗，請查看下方訊息。"
+                : googleStatus.connected
+                  ? `已連接：${googleStatus.email}`
+                  : googleStatus.needsReconnect
+                    ? `需要重新授權：${googleStatus.email}`
+                    : "尚未連接 Google 日曆"}
           </p>
           <p className="mt-1 text-[10px] text-[var(--muted)]">
             匯入活動會寫入此授權帳號的主要日曆。
           </p>
         </div>
 
-        <Button
-          disabled={blocked || googleLoading}
+        <button
+          type="button"
+          className={googleButtonClass}
+          disabled={googleActionBlocked}
           onClick={() => void loadGoogleStatus()}
         >
-          重新確認帳號
-        </Button>
+          {googleLoading ? "重新開始查詢" : "重新確認帳號"}
+        </button>
       </div>
 
       {googleNotice && (
@@ -811,7 +945,7 @@ export function CalendarPage({
       {googleError && (
         <p
           role="alert"
-          className="border-b border-[var(--line)] px-5 py-3 text-xs leading-6 text-red-400"
+          className="break-words border-b border-[var(--line)] px-5 py-3 text-xs leading-6 text-red-400"
         >
           Google 日曆：{googleError}
         </p>
@@ -859,9 +993,7 @@ export function CalendarPage({
             ＋ 建立任務
           </Button>
 
-          <h2 className="mt-7 text-xs font-semibold">
-            我的日曆
-          </h2>
+          <h2 className="mt-7 text-xs font-semibold">我的日曆</h2>
 
           <div className="mt-3 space-y-3 text-xs text-[var(--muted)]">
             <div className="flex items-center gap-2">
@@ -946,15 +1078,28 @@ export function CalendarPage({
                           title={`${item.time} ${item.title}${
                             item.done ? "（已完成）" : ""
                           }`}
-                          className={`pointer-events-auto block w-full min-w-0 truncate px-1.5 py-1 text-left text-[9px] transition hover:brightness-125 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--paper)] disabled:cursor-default ${taskClass(
+                          style={{
+                            fontSize: "9px",
+                            lineHeight: "14px",
+                          }}
+                          className={`pointer-events-auto block w-full min-w-0 overflow-hidden px-1.5 py-1 text-left transition hover:brightness-125 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--paper)] disabled:cursor-default ${taskClass(
                             item
                           )} ${
                             item.done ? "opacity-50 line-through" : ""
                           }`}
                           onClick={() => openTask(item)}
                         >
-                          {item.done ? "✓ " : ""}
-                          {item.time} {item.title}
+                          <span
+                            className="block truncate"
+                            style={{
+                              fontSize: "9px",
+                              lineHeight: "14px",
+                              fontWeight: 400,
+                            }}
+                          >
+                            {item.done ? "✓ " : ""}
+                            {item.time} {item.title}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -1023,9 +1168,7 @@ export function CalendarPage({
         >
           {editingTask && (
             <div className="border border-[var(--line)] bg-[var(--bg)] p-3 text-[10px] leading-6 text-[var(--muted)]">
-              <p>
-                狀態：{editingTask.done ? "已完成" : "未完成"}
-              </p>
+              <p>狀態：{editingTask.done ? "已完成" : "未完成"}</p>
               <p>
                 來源：
                 {editingTask.source === "todo"
@@ -1076,7 +1219,6 @@ export function CalendarPage({
                   required
                 />
               </Field>
-
               <Field label="時間">
                 <input
                   className={inputClass}
@@ -1119,7 +1261,7 @@ export function CalendarPage({
                   ? "正在確認 Google 帳號…"
                   : canImport
                     ? `Google 匯入帳號：${googleStatus.email}`
-                    : "尚未連接 Google 日曆，請先儲存任務，再於日曆頁面連接帳號。"}
+                    : "請先儲存任務，再於日曆頁面確認或連接 Google 帳號。"}
               </p>
 
               {canImport && (
