@@ -32,8 +32,6 @@ export function NextNtuApp() {
   const [userId, setUserId] =
     useState<string | null>(null);
 
-  const signedIn = Boolean(userId);
-
   const [activePage, setActivePage] =
     useState<ProductPage>("coach");
 
@@ -51,8 +49,7 @@ export function NextNtuApp() {
   const [calendarDraft, setCalendarDraft] =
     useState("");
 
-  // 對話與任務都由 Supabase 儲存。
-  // Hook 放在主程式，切換頁面時仍保留共用狀態。
+  // 共用資料放在主程式，切換頁面時繼續保留。
   const chat = useCloudConversations(userId);
   const taskStore = useCloudTasks(userId);
 
@@ -70,16 +67,6 @@ export function NextNtuApp() {
     setCalendarDraft("");
   }, []);
 
-  // 日曆共用的參數，下一步修改 CalendarPage 後，
-  // 它就會開始使用這裡的 taskStore。
-  const calendarProps = {
-    taskStore,
-    notify,
-    draftTitle: calendarDraft,
-    onDraftConsumed: handleDraftConsumed,
-  };
-
-  // 取得目前帳號，並監聽登入、登出與帳號切換。
   useEffect(() => {
     let alive = true;
     let authRevision = 0;
@@ -164,7 +151,6 @@ export function NextNtuApp() {
   }, []);
 
   function handleLoginSuccess() {
-    // 帳號 ID 由登入狀態監聽器更新。
     setActivePage("coach");
     setProfileOpen(false);
   }
@@ -241,13 +227,58 @@ export function NextNtuApp() {
     changePage("calendar");
   }
 
+  // 每次只回傳一個頁面。
+  function renderActivePage() {
+    switch (activePage) {
+      case "coach":
+        return (
+          <CoachWorkspace
+            taskStore={taskStore}
+            notify={notify}
+            onProfile={() =>
+              setProfileOpen(true)
+            }
+            chat={chat}
+          />
+        );
+
+      case "calendar":
+        return (
+          <CalendarPage
+            taskStore={taskStore}
+            notify={notify}
+            draftTitle={calendarDraft}
+            onDraftConsumed={handleDraftConsumed}
+          />
+        );
+
+      case "columns":
+        return (
+          <ColumnsPage notify={notify} />
+        );
+
+      case "talent":
+        return (
+          <TalentPage
+            notify={notify}
+            onCoffee={coffee}
+          />
+        );
+
+      case "resume":
+        return (
+          <ResumeStudio notify={notify} />
+        );
+    }
+  }
+
   if (!mounted) {
     return (
       <div className="min-h-screen bg-[#0a0a0a]" />
     );
   }
 
-  if (!signedIn) {
+  if (!userId) {
     return (
       <>
         <LoginScreen
@@ -275,42 +306,16 @@ export function NextNtuApp() {
         }
       />
 
-      {activePage === "coach" && (
-        <CoachWorkspace
-          key={userId}
-          taskStore={taskStore}
-          notify={notify}
-          onProfile={() =>
-            setProfileOpen(true)
-          }
-          chat={chat}
-        />
-      )}
-
-      {activePage === "calendar" && (
-        <CalendarPage
-          key={userId}
-          {...calendarProps}
-        />
-      )}
-
-      {activePage === "columns" && (
-        <ColumnsPage notify={notify} />
-      )}
-
-      {activePage === "talent" && (
-        <TalentPage
-          notify={notify}
-          onCoffee={coffee}
-        />
-      )}
-
-      {activePage === "resume" && (
-        <ResumeStudio notify={notify} />
-      )}
+      {/* 切換分頁或帳號時，替換整個頁面容器。 */}
+      <div
+        key={`page-${userId}-${activePage}`}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
+        {renderActivePage()}
+      </div>
 
       <ProfileDrawer
-        key={userId}
+        key={`profile-${userId}`}
         open={profileOpen}
         userId={userId}
         onClose={() =>
