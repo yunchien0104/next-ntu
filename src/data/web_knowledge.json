@@ -1,0 +1,997 @@
+{
+  "schema_version": 1,
+  "snapshot_revision": "83b7b04e2602a26d889ac22293b66b1fb11568c2b0bf695b3eab0434aa3ca0a1",
+  "generated_at": "2026-10-09T08:03:51.867300+00:00",
+  "documents": [
+    {
+      "document_id": "4a506b6b1d486c8c0b5adf0a87f8c6525a00ea23afc399fb123b4f26bff274e2",
+      "source_url": "https://management.ntu.edu.tw/cm/paragraph_file/4/200/大學部必修科目表108以後(2).pdf",
+      "pdf_sha256": "608ccdd26620e27a1cb38ea8bf22645a24e5009e34a25e73c3e96eec1d020afc",
+      "title": "財務金融學系必選修科目及學分表",
+      "department": "財務金融學系",
+      "applicable_year_text": "108學年度以後入學學生適用",
+      "admission_year_start": "108",
+      "admission_year_end": null,
+      "needs_review": true,
+      "manual_revision": "f2c4b1b4bec9c3cc192196255080d13a123083574e2428fefc4e05fb4278dda9",
+      "total_credits": 138.0,
+      "credit_components": [
+        {
+          "name": "共同必修及通識教育",
+          "credits": 24.0,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融學系學士班學生，畢業學分共138學分＝共同必修+通識教育共24學分+系訂必修69學分+選\n修45學分。其中選修學分最低應含本系所開選修課（系所編號703或723皆可）共9學分。  \n修畢所有應修課程及學分即授予管理學士之學位。"
+            }
+          ]
+        },
+        {
+          "name": "系訂必修",
+          "credits": 69.0,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融學系學士班學生，畢業學分共138學分＝共同必修+通識教育共24學分+系訂必修69學分+選\n修45學分。其中選修學分最低應含本系所開選修課（系所編號703或723皆可）共9學分。  \n修畢所有應修課程及學分即授予管理學士之學位。"
+            }
+          ]
+        },
+        {
+          "name": "選修",
+          "credits": 45.0,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融學系學士班學生，畢業學分共138學分＝共同必修+通識教育共24學分+系訂必修69學分+選\n修45學分。其中選修學分最低應含本系所開選修課（系所編號703或723皆可）共9學分。  \n修畢所有應修課程及學分即授予管理學士之學位。"
+            }
+          ]
+        }
+      ],
+      "courses": [
+        {
+          "name": "國文領域",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "國文領域"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "國文領域",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "國文領域"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "外文領域",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "外文領域"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "外文領域",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "外文領域"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "會計學原理上",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "會計學原理上"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "會計學原理下",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "會計學原理下"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "經濟學甲上",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "經濟學甲上"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "經濟學甲下",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "經濟學甲下"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "微積分1",
+          "credits": null,
+          "year": "一",
+          "semester": "上",
+          "requirement": "choose_n",
+          "group": "B",
+          "notes": "【原檔共用學分欄；個別學分未確認】原課表上學期將微積分1、2並列對應一個3學分欄；下學期將微積分3、4-在經濟商管的應用並列對應一個3學分欄。未推定每門各3學分或兩門合計3學分。備註B只列1、2、4三選二，微積分必修採計6學分，超修計入一般選修。",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "微積分1"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": [
+            "credits"
+          ]
+        },
+        {
+          "name": "微積分2",
+          "credits": null,
+          "year": "一",
+          "semester": "上",
+          "requirement": "choose_n",
+          "group": "B",
+          "notes": "【原檔共用學分欄；個別學分未確認】原課表上學期將微積分1、2並列對應一個3學分欄；下學期將微積分3、4-在經濟商管的應用並列對應一個3學分欄。未推定每門各3學分或兩門合計3學分。備註B只列1、2、4三選二，微積分必修採計6學分，超修計入一般選修。",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "微積分2"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": [
+            "credits"
+          ]
+        },
+        {
+          "name": "微積分3",
+          "credits": null,
+          "year": "一",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "【原檔共用學分欄；個別學分未確認】原課表上學期將微積分1、2並列對應一個3學分欄；下學期將微積分3、4-在經濟商管的應用並列對應一個3學分欄。未推定每門各3學分或兩門合計3學分。備註B只列1、2、4三選二，微積分必修採計6學分，超修計入一般選修。微積分3沒有B上標，也不在B候選名單；其獨立必修性及採計方式需系辦確認。\n【人工確認】requirement=required；依據：Betty人工確認微積分3為必修；個別學分及採計方式尚未確認。",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "微積分3"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            }
+          ],
+          "human_confirmations": [
+            {
+              "target_type": "course",
+              "target": {
+                "name": "微積分3",
+                "year": "一",
+                "semester": "下"
+              },
+              "field": "requirement",
+              "source_value": "uncertain",
+              "value": "required",
+              "type": "user_confirmed",
+              "confirmed_by": "Betty",
+              "basis": "Betty人工確認微積分3為必修；個別學分及採計方式尚未確認",
+              "confirmed_at": "2026-10-09T07:13:47.090406+00:00",
+              "scope": "僅適用此PDF；新版本須重新確認"
+            }
+          ],
+          "unknown_fields": [
+            "credits"
+          ]
+        },
+        {
+          "name": "微積分4-在經濟商管的應用",
+          "credits": null,
+          "year": "一",
+          "semester": "下",
+          "requirement": "choose_n",
+          "group": "B",
+          "notes": "【原檔共用學分欄；個別學分未確認】原課表上學期將微積分1、2並列對應一個3學分欄；下學期將微積分3、4-在經濟商管的應用並列對應一個3學分欄。未推定每門各3學分或兩門合計3學分。備註B只列1、2、4三選二，微積分必修採計6學分，超修計入一般選修。",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "微積分4-\n在經濟商管的應用"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            },
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": [
+            "credits"
+          ]
+        },
+        {
+          "name": "財務金融入門",
+          "credits": 3.0,
+          "year": "一",
+          "semester": "上",
+          "requirement": "required_elective",
+          "group": null,
+          "notes": "必選3學分，計入系選最低9學分內，不重複加到系訂必修。",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融入門"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 1,
+              "quote": "財務金融入門(必選，\n計入系選9 學分內)"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "民法概要乙",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "民法概要乙"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "商事法",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "商事法"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "統計學一上",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "統計學一上"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "計量導論",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "計量導論"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "個體經濟學",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "個體經濟學"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "總體經濟學",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "總體經濟學"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "中級會計學上",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "中級會計學上"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "中級會計學下",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "中級會計學下"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "貨幣銀行學甲",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "貨幣銀行學甲"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "投資學",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "投資學"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "管理數學",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "上",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "管理數學"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "程式設計",
+          "credits": 3.0,
+          "year": "二",
+          "semester": "下",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "程式設計"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "財務管理",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務管理"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "財務報告分析",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務報告分析"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "企業管理",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "上",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "企業管理"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "金融機構管理",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "下",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "金融機構管理"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "風險管理與保險",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "風險管理與保險"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "財務計量",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "下",
+          "requirement": "choose_n",
+          "group": "A",
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務計量"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            },
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        },
+        {
+          "name": "期貨與選擇權",
+          "credits": 3.0,
+          "year": "三",
+          "semester": "上",
+          "requirement": "required",
+          "group": null,
+          "notes": "",
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "期貨與選擇權"
+            },
+            {
+              "page": 1,
+              "quote": "3"
+            }
+          ],
+          "human_confirmations": [],
+          "unknown_fields": []
+        }
+      ],
+      "rules": [
+        {
+          "title": "畢業學分及學位",
+          "rule_type": "credit",
+          "statement": "畢業總學分138＝共同必修及通識24＋系訂必修69＋選修45。修畢所有應修課程及學分授予管理學士學位。",
+          "group": null,
+          "courses": [],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融學系學士班學生，畢業學分共138學分＝共同必修+通識教育共24學分+系訂必修69學分+選\n修45學分。其中選修學分最低應含本系所開選修課（系所編號703或723皆可）共9學分。  \n修畢所有應修課程及學分即授予管理學士之學位。"
+            }
+          ]
+        },
+        {
+          "title": "選修學分與最低系選",
+          "rule_type": "credit",
+          "statement": "選修共45學分，其中至少9學分須為本系所開選修（系所編號703或723皆可）；課表列一般選修36學分。財務金融入門必選3學分，計入系選9學分內；系選課依當年度開課為準。",
+          "group": null,
+          "courses": [],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "財務金融學系學士班學生，畢業學分共138學分＝共同必修+通識教育共24學分+系訂必修69學分+選\n修45學分。其中選修學分最低應含本系所開選修課（系所編號703或723皆可）共9學分。  \n修畢所有應修課程及學分即授予管理學士之學位。"
+            },
+            {
+              "page": 1,
+              "quote": "一般選修"
+            },
+            {
+              "page": 1,
+              "quote": "36"
+            },
+            {
+              "page": 1,
+              "quote": "財務金融入門(必選，\n計入系選9 學分內)"
+            },
+            {
+              "page": 1,
+              "quote": "詳細本系所開選\n修課依當年度所\n開課程為準"
+            }
+          ]
+        },
+        {
+          "title": "共同必修與通識教育",
+          "rule_type": "credit",
+          "statement": "共同必修科目（國文及英文）＋通識教育共24學分，須詳閱《國立臺灣大學通識教育課程實施辦法》。這24學分已包括在138學分內。",
+          "group": null,
+          "courses": [],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "1.共同必修科目(國文及英文)+通識教育共24學分，請同學詳閱「國立臺灣大學通識教育課程實施辦"
+            },
+            {
+              "page": 2,
+              "quote": "法」。"
+            }
+          ]
+        },
+        {
+          "title": "服務課必修門數及學分",
+          "rule_type": "other",
+          "statement": "2.服務課必修2門，但0學分，可重複修習。",
+          "group": null,
+          "courses": [],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 2,
+              "quote": "2.服務課必修2門，但0學分，可重複修習。"
+            }
+          ]
+        },
+        {
+          "title": "體育必修及畢業學分排除",
+          "rule_type": "other",
+          "statement": "3.體育（一）（二）（三）（四）為必修，共4學分，但不計入畢業應修總學分數內。",
+          "group": null,
+          "courses": [
+            "體育（一）",
+            "體育（二）",
+            "體育（三）",
+            "體育（四）"
+          ],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 2,
+              "quote": "3.體育（一）（二）（三）（四）為必修，共4學分，但不計入畢業應修總學分數內。"
+            }
+          ]
+        },
+        {
+          "title": "群組A選課規定",
+          "rule_type": "choose_n",
+          "statement": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。",
+          "group": "A",
+          "courses": [
+            "貨幣銀行學甲",
+            "管理數學",
+            "商事法",
+            "企業管理",
+            "程式設計",
+            "財務計量"
+          ],
+          "choose_count": 4,
+          "evidence": [
+            {
+              "page": 2,
+              "quote": "群組A：貨幣銀行學甲、管理數學、商事法、企業管理、程式設計、財務計量為必修六選四之科目。"
+            }
+          ]
+        },
+        {
+          "title": "群組B選課與微積分採計",
+          "rule_type": "choose_n",
+          "statement": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。",
+          "group": "B",
+          "courses": [
+            "微積分1",
+            "微積分2",
+            "微積分4-在經濟商管的應用"
+          ],
+          "choose_count": 2,
+          "evidence": [
+            {
+              "page": 2,
+              "quote": "群組B : 微積分1、微積分2、微積分4-在經濟商管的應用為三選二之科目，本系微積分學分採計必修6學\n分，超修者將計入一般選修。"
+            }
+          ]
+        },
+        {
+          "title": "四年級未規定必修課程",
+          "rule_type": "other",
+          "statement": "為讓學生專心準備實習、各項考試、出國或就業，本系\n大四未規定必修課程，以減輕學生負擔。",
+          "group": null,
+          "courses": [],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 1,
+              "quote": "為讓學生專心準備實習、各項考試、出國或就業，本系\n大四未規定必修課程，以減輕學生負擔。"
+            }
+          ]
+        },
+        {
+          "title": "進階英語必修及全部免修條件",
+          "rule_type": "exemption",
+          "statement": "5.自九十一學年度（含以後）入學學生起，大二以上必修進階英語（一、二），修畢始得畢業。學生符\n合下列條件之一者，得免修全部課程，免修申請：http://investea.aca.ntu.edu.tw/secen-waive/OpenTime.asp  \n(1) 通過全民英語能力分級檢定中高級初試。  \n(2) 托福網路測驗（TOEFL iBT）72 分（含）以上 \n(3) 國際英語測試（IELTS）ACADEMIC 級 6.0 級（含）以上 \n(4) 外語能力測驗（FLPT）之英語測驗筆試各分項成績 70 分（含）以上 \n(5) 英國劍橋大學中等英文認證（FCE）B2 級（含）以上 \n(6) 國際溝通英語測驗（TOEIC）總分785分（含）以上 \n(7) 獲得列入教育部參考名冊之英語系國家大學（含）以上之學位 \n(8) 其他經由進階英語課程規劃小組認可，並經共同教育中心核備之英語能力測驗 \n註*原已通過本校集體報名「全民英語能力分級檢定中高級初試」，或通過本校外語教學暨資源中心自\n訂測驗，或通過「國立臺灣大學學士班大一英文免修施行要點」之免修大一英文者，因已取得免修「進\n階英語」課程資格，故無需再提出申請。",
+          "group": null,
+          "courses": [
+            "進階英語（一）",
+            "進階英語（二）"
+          ],
+          "choose_count": null,
+          "evidence": [
+            {
+              "page": 2,
+              "quote": "5.自九十一學年度（含以後）入學學生起，大二以上必修進階英語（一、二），修畢始得畢業。學生符\n合下列條件之一者，得免修全部課程，免修申請：http://investea.aca.ntu.edu.tw/secen-waive/OpenTime.asp  \n(1) 通過全民英語能力分級檢定中高級初試。  \n(2) 托福網路測驗（TOEFL iBT）72 分（含）以上 \n(3) 國際英語測試（IELTS）ACADEMIC 級 6.0 級（含）以上 \n(4) 外語能力測驗（FLPT）之英語測驗筆試各分項成績 70 分（含）以上 \n(5) 英國劍橋大學中等英文認證（FCE）B2 級（含）以上 \n(6) 國際溝通英語測驗（TOEIC）總分785分（含）以上 \n(7) 獲得列入教育部參考名冊之英語系國家大學（含）以上之學位 \n(8) 其他經由進階英語課程規劃小組認可，並經共同教育中心核備之英語能力測驗 \n註*原已通過本校集體報名「全民英語能力分級檢定中高級初試」，或通過本校外語教學暨資源中心自\n訂測驗，或通過「國立臺灣大學學士班大一英文免修施行要點」之免修大一英文者，因已取得免修「進\n階英語」課程資格，故無需再提出申請。"
+            }
+          ]
+        }
+      ],
+      "human_confirmations": [
+        {
+          "target_type": "course",
+          "target": {
+            "name": "微積分3",
+            "year": "一",
+            "semester": "下"
+          },
+          "field": "requirement",
+          "source_value": "uncertain",
+          "value": "required",
+          "type": "user_confirmed",
+          "confirmed_by": "Betty",
+          "basis": "Betty人工確認微積分3為必修；個別學分及採計方式尚未確認",
+          "confirmed_at": "2026-10-09T07:13:47.090406+00:00",
+          "scope": "僅適用此PDF；新版本須重新確認"
+        }
+      ],
+      "issues": [
+        "[提醒] 四門微積分的個別學分未由共用學分欄推定；微積分3的獨立必修性及採計方式需系辦確認。索引保留未確認欄位，不得回答為已確認。",
+        "[提醒] 整理依據為SHA-256完全相同的兩頁原檔及頁面欄位對照，未使用AI修正或AI核對；仍待人工審核，未核驗來源網址或更新版本。"
+      ]
+    }
+  ],
+  "usage": "只有指定欄位具人工確認；null/uncertain不得推定為0或已確認。本檔輸出不等於網站已部署。"
+}
